@@ -3,6 +3,9 @@ venv/
 .venv/
 env/
 
+# Cursor environment
+.cursor/
+
 # Python
 __pycache__/
 *.py[cod]
