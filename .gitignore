@@ -1,0 +1,32 @@
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+notebooks/_scratch/
+
+# ML artefacts (generated, not source)
+data/
+outputs/
+runs/
+wandb/
+*.pt
+*.ckpt
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.DS_Store
+
+# IDE (omit .cursor/ if you want Cursor rules committed)
+.vscode/
