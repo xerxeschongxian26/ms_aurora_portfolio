@@ -18,7 +18,7 @@ build/
 notebooks/_scratch/
 
 # ML artefacts (generated, not source)
-data/
+/data/
 outputs/
 runs/
 wandb/
