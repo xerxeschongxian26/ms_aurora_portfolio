@@ -11,7 +11,7 @@ inference boundary before ``model.forward``, not inside the ``load(init_time, sp
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from aurora import Batch
 
@@ -20,6 +20,7 @@ from aurora_inference.contract import ModelSpec
 __all__ = ["BatchSource"]
 
 
+@runtime_checkable
 class BatchSource(Protocol):
     """Structural interface for anything that can produce an inference ``Batch``."""
 
