@@ -36,6 +36,8 @@ Held in `AURORA_PRETRAINED_SPEC` (`ModelSpec`):
 
 `ModelSpec` parameterises keys, levels, and timestep so multi-checkpoint support later is a config change, not a rewrite. Extra keys are allowed; **missing required keys fail**.
 
+> **Hardening (deferred):** reject *unknown* keys (keys present in the batch but not in `ModelSpec`) as well. WP2 only requires that every spec key is present — surplus fields pass. Tightening to an exact key set is a reasonable later change; not in Stage 0 acceptance.
+
 Other Aurora variants (`AuroraAirPollution`, `AuroraWave`) have different contracts — deferred beyond Stage 0.
 
 ## Common traps
@@ -57,15 +59,19 @@ Same name, different fields. Mixing them up is a classic silent-failure source.
 - `metadata.time` has length `B`; **each element is the datetime at index 1 (t1), not t0**
 - **t0 and t1 must be exactly 6 hours apart** — this cannot be recovered from `Batch` alone
 
-CDS/ERA5 long names differ from Aurora short names (e.g. `2m_temperature` → `2t`). Missing keys are silently omitted by the model; wrong keys can `KeyError` or mis-embed.
+CDS/ERA5 long names differ from Aurora short names (e.g. `2m_temperature` → `2t`). Upstream Aurora may silently omit missing keys; **our** `validate_batch` rejects them. Wrong keys can still `KeyError` or mis-embed inside the model — another reason not to rely on Aurora as the gate.
 
 ### Lat / lon orientation
 
 | Coord | Rule |
 |---|---|
-| `lat` | Strictly **decreasing** from +90 → −90 (ERA5 often arrives ascending — flip it) |
+| `lat` | Strictly **decreasing** from +90 → −90 |
 | `lon` | Strictly **increasing** in **`[0, 360)`** — must **not** include 360 (ERA5 often uses `[-180, 180]`) |
 | dtypes | `float32` or `float64` for coords; weather fields must be `float32` |
+
+**Flip coords and fields together.** ERA5 often arrives with ascending latitude. Reversing only `metadata.lat` desynchronizes coordinates from data: `lat[i]` must still label spatial row `i` of every field. When correcting orientation, flip the **H** axis of all `surf_vars`, `atmos_vars`, and `static_vars` in lockstep with `lat` (and reorder the **W** axis the same way if you remap `lon`). Never mutate coordinates alone after the fact.
+
+Stage 0 fixtures / `SyntheticSource` must **build** lat decreasing with fields already consistent — there is nothing to flip. The lockstep rule applies when constructing batches from real ERA5 (Stage 1 `ArcoEra5Source`).
 
 ### 1-D lat / lon only (Stage 0)
 

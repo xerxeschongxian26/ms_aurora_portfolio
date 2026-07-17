@@ -51,9 +51,13 @@ Common Traps:
   - Model output Batch has T == 1 (single predicted step), not T == 2
 
   Coordinates
-  - lat strictly decreasing from +90 to -90 (ERA5 often arrives ascending — flip it)
+  - lat strictly decreasing from +90 to -90
   - lon strictly increasing in [0, 360); must not include 360 (ERA5 often uses [-180, 180])
   - lat/lon dtypes should be float32 or float64 at minimum (float32 required for fields)
+  - ERA5 often arrives with ascending lat — when correcting, flip lat AND the H axis of
+    every surf/atmos/static tensor in lockstep (lon remaps must reorder W likewise).
+    Never flip coordinates alone. Synthetic fixtures should build orientation correctly
+    from the start (Stage 0); real ERA5 remapping is Stage 1 source work.
 
   Variables
   - Two different "z" keys: static_vars["z"] is orography; atmos_vars["z"] is
@@ -63,7 +67,9 @@ Common Traps:
       static: lsm, slt, z
       atmos:  t, u, v, q, z
   - CDS/ERA5 names differ from Aurora short names (e.g. 2m_temperature -> 2t)
-  - Missing keys are silently omitted by the model; incorrect keys can KeyError or mis-embed
+  - Upstream Aurora may silently omit missing keys; validate_batch rejects them.
+    Extra/unknown keys are currently allowed — rejecting them is deferred hardening.
+  - Incorrect keys can KeyError or mis-embed inside the model
 
 
   Pressure levels
