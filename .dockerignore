@@ -1,0 +1,35 @@
+# VCS / local env
+.git/
+.venv/
+venv/
+env/
+
+# IDE / agent / CI (not needed in the image)
+.cursor/
+.vscode/
+.github/
+
+# Python build / tool caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Notebooks (scratch / not runtime)
+notebooks/
+
+# ML artefacts — never bake checkpoints into the image
+/data/
+outputs/
+runs/
+wandb/
+*.pt
+*.ckpt
+
+# OS junk
+.DS_Store
