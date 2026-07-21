@@ -1,6 +1,13 @@
 # Declares targets that are not real files, so `make` always runs their recipes/commands defined here.
 .PHONY: install lint format typecheck test test-slow check docker-build docker-run
 
+# Docker CPU image platform. Preferred default matches GH200 / Apple Silicon.
+# For common x86_64 cloud GPUs (A10/A100/H100): make docker-build PLATFORM=linux/amd64
+PLATFORM ?= linux/arm64
+# Full platform in the tag; `/` → `-` because Docker tags cannot contain `/`
+# (linux/arm64 → cpu-linux-arm64, linux/amd64 → cpu-linux-amd64).
+IMAGE_CPU := aurora-inference:cpu-$(subst /,-,$(PLATFORM))
+
 # Install the project + dev tools into .venv from the lockfile (reproducible local env).
 #   uv sync          — create/update the virtualenv and install dependencies
 #   --extra dev      — also install the [project.optional-dependencies] "dev" group
@@ -50,27 +57,21 @@ test-slow:
 check: lint typecheck test
 	uv run ruff format --check src tests
 
-# Build the linux/arm64 CPU image from the Dockerfile (does not run the model).
-#   docker build              — execute Dockerfile instructions → image layers
-#   --platform linux/arm64    — build for aarch64 Linux (native on M1; matches GH200)
-#   --target cpu              — stop at the named "cpu" stage (skip gpu scaffold)
-#   -t aurora-inference:cpu   — tag the resulting image as name:tag
-#   .                         — build context = current directory (respects .dockerignore)
+# Build the CPU image for $(PLATFORM) (does not run the model).
+#   Default PLATFORM=linux/arm64 (GH200-faithful; native on M1).
+#   x86 cloud hosts: make docker-build PLATFORM=linux/amd64
+#   Tags: aurora-inference:cpu-<platform> and aurora-inference:cpu (latest build for PLATFORM)
+#   --target cpu — stop at the named "cpu" stage (skip gpu scaffold)
 docker-build:
-	docker build --platform linux/arm64 --target cpu -t aurora-inference:cpu .
+	docker build --platform $(PLATFORM) --target cpu \
+		-t $(IMAGE_CPU) -t aurora-inference:cpu .
 
 # Run the image's default CMD (scripts/toy_forward.py) with the host HF cache mounted.
-#   docker run                         — create and start a container from an image
-#   --rm                               — delete the container filesystem when it exits
-#   --platform linux/arm64             — run as aarch64 Linux (must match the image)
-#   -e HF_HOME=/cache/huggingface      — tell HuggingFace Hub where to read/write cache
-#   -v HOST:CONTAINER                  — bind-mount host cache into the container path
-#        $(HOME)/.cache/huggingface    — host side (shared with local / make test-slow)
-#        /cache/huggingface            — container side (matches HF_HOME)
-#   aurora-inference:cpu               — image to run (no override → uses Dockerfile CMD)
+#   PLATFORM must match the image that was built.
+#   Override: make docker-run PLATFORM=linux/amd64
 docker-run:
 	docker run --rm \
-		--platform linux/arm64 \
+		--platform $(PLATFORM) \
 		-e HF_HOME=/cache/huggingface \
 		-v "$(HOME)/.cache/huggingface:/cache/huggingface" \
-		aurora-inference:cpu
+		$(IMAGE_CPU)
