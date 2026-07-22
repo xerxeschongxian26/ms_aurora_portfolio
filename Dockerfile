@@ -57,6 +57,7 @@ COPY src ./src
 COPY scripts ./scripts
 
 # Placeholder: Stage 1 replaces this with CUDA-index torch install + uv sync.
+# - this placeholder never runs the CMD instructions below due to exit 1
 RUN echo "GPU stage is scaffold only; build with --target cpu for Stage 0" >&2 \
     && exit 1
 

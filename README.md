@@ -38,13 +38,27 @@ Objectives include, but are not limited to the following:
 
 ## Quickstart
 
+The instructions here are for running a toy inference on a CPU/GPU,
+All commands are based on configurations in Makefile, refer to the Makefile for more information
+
+After cloning the repo, run the following command
+
+```sh
+make docker-build
+```
+
+This builds the docker image file based on the Dockerfile. This command takes approximately 14 minutes and produces a Docker Image file, required by the next command. Future runs will be based on the cache of the Docker image.
+
+Once the docker image is built, run the following command.
+
+```sh
+make docker-run
+```
+
+The Docker image is ran. Depending on the PLATFORM selected, the inference will be performed on the CPU or GPU.
 
 
 ## Architecture
-
-
-
-## Scope boundary
 
 
 

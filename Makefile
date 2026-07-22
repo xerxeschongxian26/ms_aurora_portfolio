@@ -1,13 +1,6 @@
 # Declares targets that are not real files, so `make` always runs their recipes/commands defined here.
 .PHONY: install lint format typecheck test test-slow check docker-build docker-run
 
-# Docker CPU image platform. Preferred default matches GH200 / Apple Silicon.
-# For common x86_64 cloud GPUs (A10/A100/H100): make docker-build PLATFORM=linux/amd64
-PLATFORM ?= linux/arm64
-# Full platform in the tag; `/` → `-` because Docker tags cannot contain `/`
-# (linux/arm64 → cpu-linux-arm64, linux/amd64 → cpu-linux-amd64).
-IMAGE_CPU := aurora-inference:cpu-$(subst /,-,$(PLATFORM))
-
 # Install the project + dev tools into .venv from the lockfile (reproducible local env).
 #   uv sync          — create/update the virtualenv and install dependencies
 #   --extra dev      — also install the [project.optional-dependencies] "dev" group
@@ -57,21 +50,29 @@ test-slow:
 check: lint typecheck test
 	uv run ruff format --check src tests
 
-# Build the CPU image for $(PLATFORM) (does not run the model).
-#   Default PLATFORM=linux/arm64 (GH200-faithful; native on M1).
-#   x86 cloud hosts: make docker-build PLATFORM=linux/amd64
-#   Tags: aurora-inference:cpu-<platform> and aurora-inference:cpu (latest build for PLATFORM)
-#   --target cpu — stop at the named "cpu" stage (skip gpu scaffold)
-docker-build:
-	docker build --platform $(PLATFORM) --target cpu \
-		-t $(IMAGE_CPU) -t aurora-inference:cpu .
+# Declare variables PLATFORM and IMAGE_TAG
+# Default value PLATFORM=linux/arm64 (GH200-compatible; native architecture on Apple M1).
+# Docker CPU image platform. Preferred default matches GH200 / Apple Silicon.
+# For common x86_64 cloud GPUs (A10/A100/H100): use command "make docker-build PLATFORM=linux/amd64"
+# Platform string in the tag; `/` character replaced with `-` because Docker tags cannot contain `/`
+# - "linux/arm64" has the tag "cpu-linux-arm64" | "linux/amd64" has the tag "cpu-linux-amd64"
+PLATFORM ?= linux/arm64
+IMAGE_TAG := aurora-inference:cpu-$(subst /,-,$(PLATFORM))
 
-# Run the image's default CMD (scripts/toy_forward.py) with the host HF cache mounted.
-#   PLATFORM must match the image that was built.
-#   Override: make docker-run PLATFORM=linux/amd64
+# Build the CPU only image for $(PLATFORM) and names the image with $(IMAGE_TAG) but does not run it.
+#   For x86 cloud hosts: "make docker-build PLATFORM=linux/amd64"
+#   IMAGE_TAG: aurora-inference:cpu-<platform> (e.g. cpu-linux-arm64)
+#   "--target cpu" stops build at the named "cpu" stage and skips the gpu scaffold
+docker-build:
+	docker build --target cpu  \
+	     		 --platform $(PLATFORM) \
+				 -t $(IMAGE_TAG) .
+
+# Run the image specified by $(IMAGE_TAG) default CMD (scripts/toy_forward.py) with the host
+# HuggingFace cache mounted to the container and deletes the container upon completion
 docker-run:
-	docker run --rm \
-		--platform $(PLATFORM) \
-		-e HF_HOME=/cache/huggingface \
-		-v "$(HOME)/.cache/huggingface:/cache/huggingface" \
-		$(IMAGE_CPU)
+	docker run -e HF_HOME=/cache/huggingface \
+			   -v "$(HOME)/.cache/huggingface:/cache/huggingface" \
+			   --rm \
+			   --platform $(PLATFORM) \
+			   $(IMAGE_TAG)
