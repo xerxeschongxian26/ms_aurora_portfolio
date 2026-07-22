@@ -21,10 +21,20 @@ With growing concerns over data privacy, data governance and the overall soverei
 
 At time of writing, the value of fine-tuning foundation models is acknowledged but such plans are reserved for the future.
 
+Q. Which model? Weather? Ocean? Airpollution? etc
+
 ## Current stage: Stage 0
 
-Stage 0 forms the scaffolding.
+Stage 0 involves building the scaffolding for the project.
 
+Objectives include, but are not limited to the following:
+1. Set up the repository with pre-commit hooks and Continuous Integration (CI) best practices
+2. Locking dependencies using uv to enforce reproducibility
+3. Define the contract for the model inputs and its associated tests
+4. Create synthetic batches to run toy inferences on CPUs only
+5. Create Docker files to build images and support runs on local and remote instances
+6. Create Docker file that supports dual-architectures (linux/arm64 and linux/amd64)
+7. Trial running the sequence of setup and tear down on a remote instance
 
 ## Quickstart
 
@@ -40,6 +50,39 @@ Stage 0 forms the scaffolding.
 
 ## Roadmap
 
+### Stage 0 — Foundations
+
+Stage 0 — Foundations (done) — Repo tooling and CI; locked deps with uv; Batch input contract + tests; synthetic batches for CPU toy inference; CPU Docker for local/remote; remote setup/teardown rehearsal via the GPU playbook. No ERA5, no served API, no skill metrics.
+
+### Stage 1 — Containerised GPU Inference
+
+Praesent pretium magna id mollis pretium. Nullam tincidunt, leo sed eleifend cursus, risus erat dictum lectus, in faucibus sem urna ac erat.
+
+Donec maximus, enim eget rhoncus venenatis, tortor nulla cursus lectus, quis volutpat velit felis nec neque.
+
+### Stage 2 — API Service Deployment
+
+Sed accumsan purus et feugiat ornare. Mauris malesuada sodales velit ac tempor.
+
+Morbi vulputate ex nisl, vel dictum neque finibus cursus. Etiam condimentum urna lectus, at hendrerit orci maximus sed.
+
+### Stage 3 — Inference Optimisation Experiments
+
+Nam facilisis enim eu tortor facilisis blandit. Nullam ac dui consectetur, rutrum leo ut, feugiat urna.
+
+Vestibulum dictum quam at quam feugiat, non venenatis sapien auctor. Suspendisse potenti.
+
+### Stage 4 — Operationalisation & Observability
+
+Mauris posuere velit sit amet lacus porttitor efficitur. Quisque dictum vehicula odio vel euismod.
+
+Nam accumsan, sapien a maximus faucibus, risus urna porta eros, et interdum libero justo nec magna.
+
+### Stage 5 — Decision Documentation & Knowledge Transfer
+
+Maecenas egestas elit in erat facilisis, ut placerat sem posuere. Integer pharetra nisl vitae finibus scelerisque.
+
+Proin finibus eros sed tellus dapibus, nec volutpat tortor placerat. Cras laoreet arcu risus, ut dapibus turpis posuere id.
 
 
 ## Project Development Notes
