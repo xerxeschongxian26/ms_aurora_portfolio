@@ -38,24 +38,73 @@ Objectives include, but are not limited to the following:
 
 ## Quickstart
 
-The instructions here are for running a toy inference on a CPU/GPU,
-All commands are based on configurations in Makefile, refer to the Makefile for more information
+### Prerequisites
 
-After cloning the repo, run the following command
+Ensure that Python version 3.12 and uv are installed.
+
+The instructions here are for running a toy inference on a CPU.
+
+All make commands are based on configurations specified in the `Makefile` in the project root.
+
+Begin by cloning the repository and changing the working directory to the cloned project root.
+
+```sh
+git clone https://github.com/xerxeschongxian26/ms_aurora_portfolio.git
+cd ms_aurora_portfolio
+```
+
+Run `make install` to install the required dependencies as specified in the `uv.lock` file.
+
+```sh
+make install
+```
+
+Next, run `make check` to run linters, typecheckers, the fast default pytest suite, and the ruff format check.
+
+```sh
+make check
+```
+
+Next, run `make test-slow` to run tests that are marked as slow. At the completion of Stage 0, these tests are still simple and usually quick once weights are cached; the first run may take much longer while Hugging Face downloads.
+
+```sh
+make test-slow
+```
+
+When the `make` commands above complete without error, the repository is deemed to be in a functional state.
+
+To run the remaining commands in this section, ensure that Docker has been installed.
+
+Run the commands below to build the Docker image from the `Dockerfile`. The commands assume a default `linux/arm64` architecture; a mismatch will return an `exec format error`.
+
+The image does not bake in model checkpoints. Weights are cached on the host machine under `~/.cache/huggingface` and mounted into the container at run time (see the `docker-run` target in the `Makefile`).
+
+The image building step takes approximately 10 minutes wall-time when running for the first time. Subsequent runs will take substantially less time as they are based on the cache of the Docker image.
 
 ```sh
 make docker-build
-```
-
-This builds the docker image file based on the Dockerfile. This command takes approximately 14 minutes and produces a Docker Image file, required by the next command. Future runs will be based on the cache of the Docker image.
-
-Once the docker image is built, run the following command.
-
-```sh
 make docker-run
 ```
 
-The Docker image is ran. Depending on the PLATFORM selected, the inference will be performed on the CPU or GPU.
+If your host machine is based on an AMD/Intel architecture, use the following commands instead.
+
+```sh
+make docker-build PLATFORM=linux/amd64
+make docker-run PLATFORM=linux/amd64
+```
+
+The following should be printed to the terminal as the result of an inference using a synthetic input `Batch`.
+```
+=== NO FORECAST SKILL === AuroraSmallPretrained + SyntheticSource is a plumbing proof only. Output is meaningless; do not report skill numbers.
+input shapes: surf 2t=(1, 2, 32, 64) atmos t=(1, 2, 13, 32, 64) grid=32x64 device=cpu
+model load wall time: 4.01s (includes HF cache hit or download)
+forward wall time: 0.75s
+output shapes: surf 2t=(1, 1, 32, 64) atmos t=(1, 1, 13, 32, 64) (T==1 as expected)
+peak RSS: 1696.29 MiB (1778688000 bytes)
+=== NO FORECAST SKILL ===
+```
+
+
 
 
 ## Architecture
