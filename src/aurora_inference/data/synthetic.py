@@ -62,7 +62,7 @@ class SyntheticSource:
         """Synthesize a contract-shaped batch whose ``metadata.time`` is ``init_time`` (t1)."""
         hours = spec.input_timestep_hours
         t0 = init_time - timedelta(hours=hours)
-        validate_input_times(t0, init_time, hours=hours)
+        validate_input_times(t0=t0, t1=init_time, hours=hours)
 
         generator = torch.Generator()
         generator.manual_seed(self.seed)

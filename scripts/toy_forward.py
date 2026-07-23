@@ -3,7 +3,7 @@
 
 Loads AuroraSmallPretrained with a small synthetic batch, runs one forward step,
 and logs shapes / timing / peak RSS (resident set size). This is not a true inference
-AuroraSmallPretrained on synthetic data has no forecast skill.
+as it uses AuroraSmallPretrained on synthetic data and has no forecast skill.
 """
 
 from __future__ import annotations
@@ -52,14 +52,23 @@ class ToyForwardResult:
 
 
 def _peak_rss_bytes() -> int:
-    """Return peak resident set size in bytes (platform-normalized).
-    macOS reports bytes; Linux reports kilobytes.
+    """Return peak resident set size (RSS) in bytes (platform-normalized).
+
+    ``ru_maxrss`` units differ by OS: macOS reports bytes; Linux reports kilobytes.
+    This helper normalises the value to bytes.
+
+    Notes:
+        - Statistics are per-process. External apps (e.g. a RAM-heavy browser) do not affect
+          the recorded peak, though heavy system load may slow ``load_seconds`` /
+          ``forward_seconds``.
+        - Peak RSS is a high-water mark since this Python process started (imports,
+          model load, forward), not current memory at call time.
     """
-    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    peak_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 
     if platform.system() == "Darwin":
-        return int(rss)
-    return int(rss) * 1024
+        return int(peak_rss)
+    return int(peak_rss) * 1024
 
 
 def _assert_output_time_dim_is_one(prediction: Batch) -> None:
@@ -78,9 +87,11 @@ def run_toy_forward() -> ToyForwardResult:
     """Run the WP5 CPU plumbing proof and return logged metrics."""
     _LOG.warning(_NO_SKILL_BANNER_TOP)
 
+    # Create a synthetic Batch object
     source = SyntheticSource(height=_GRID_HEIGHT, width=_GRID_WIDTH)
     batch = source.load(_INIT_TIME, AURORA_PRETRAINED_SPEC)
     validate_batch(batch, AURORA_PRETRAINED_SPEC)
+    batch = batch.to(_DEVICE)
 
     input_surf_shape = tuple(batch.surf_vars["2t"].shape)
     input_atmos_shape = tuple(batch.atmos_vars["t"].shape)
@@ -93,12 +104,13 @@ def run_toy_forward() -> ToyForwardResult:
         _DEVICE,
     )
 
+    # Load model and log time taken
     load_started = time.perf_counter()
     model = load_model(device=_DEVICE)
     load_seconds = time.perf_counter() - load_started
     _LOG.info("model load wall time: %.2fs (includes HF cache hit or download)", load_seconds)
 
-    batch = batch.to(_DEVICE)
+    # Make inference and log time taken
     forward_started = time.perf_counter()
     with torch.inference_mode():
         prediction = model(batch)
