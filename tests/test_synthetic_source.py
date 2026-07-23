@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 
+import pytest
 import torch
 
 from aurora_inference.contract import AURORA_PRETRAINED_SPEC, validate_batch
@@ -69,3 +71,11 @@ def test_synthetic_source_different_seed_differs() -> None:
         or any(not torch.equal(a.atmos_vars[key], b.atmos_vars[key]) for key in _SPEC.atmos_vars)
     )
     assert differs
+
+
+def test_synthetic_source_load_raises_on_missing_range_entry() -> None:
+    """Unknown spec keys must fail at lookup, even for synthetic source"""
+    spec = replace(AURORA_PRETRAINED_SPEC, surf_vars=("2t", "unknown_var"))
+
+    with pytest.raises(KeyError):
+        SyntheticSource().load(_INIT_TIME, spec)
