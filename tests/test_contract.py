@@ -23,9 +23,25 @@ def test_validate_input_times_accepts_six_hour_spacing() -> None:
     validate_input_times(t0, t1)
 
 
-def test_validate_input_times_rejects_wrong_spacing() -> None:
+def test_validate_input_times_rejects_spacing_shorter_than_six_hours() -> None:
     t0 = datetime(2020, 6, 15, 6, 0)
     t1 = t0 + timedelta(hours=3)
+
+    with pytest.raises(BatchContractError, match=r"input_times: \(received delta"):
+        validate_input_times(t0, t1)
+
+
+def test_validate_input_times_rejects_spacing_longer_than_six_hours() -> None:
+    t0 = datetime(2020, 6, 15, 6, 0)
+    t1 = t0 + timedelta(hours=12)
+
+    with pytest.raises(BatchContractError, match=r"input_times: \(received delta"):
+        validate_input_times(t0, t1)
+
+
+def test_validate_input_times_rejects_t1_before_t0() -> None:
+    t0 = datetime(2020, 6, 15, 6, 0)
+    t1 = t0 - timedelta(hours=6)
 
     with pytest.raises(BatchContractError, match=r"input_times: \(received delta"):
         validate_input_times(t0, t1)
