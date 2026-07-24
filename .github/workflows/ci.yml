@@ -1,16 +1,17 @@
-name: CI
+name: Continuous Integration (CI)
 
 on:
   push:
   pull_request:
 
 jobs:
-  check:
+  run_continuous_integration_checks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Setup repository using a GitHub action
+        uses: actions/checkout@v4
 
-      - name: Install uv
+      - name: Install uv using a GitHub action
         uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"

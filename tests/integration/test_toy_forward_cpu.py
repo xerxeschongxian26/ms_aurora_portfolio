@@ -1,8 +1,9 @@
 """Slow CPU integration test for ``scripts/toy_forward.py`` (WP5).
 
 Runs a real pinned-checkpoint load and one forward pass. First run may download
-from HuggingFace into ``~/.cache/huggingface/``. Excluded from default pytest /
-CI via ``addopts = -m 'not slow'``; run with ``make test-slow``.
+from HuggingFace into ``~/.cache/huggingface/``.
+Excluded from default pytest CI via ``addopts = -m 'not slow'``
+Run with ``make test-slow``.
 """
 
 from __future__ import annotations
@@ -31,8 +32,8 @@ def _load_toy_forward_module() -> ModuleType:
 
 
 @pytest.mark.slow
-def test_toy_forward_cpu_runs_and_output_has_time_dim_1() -> None:
-    """Plumbing proof: real load + forward on CPU; output time dim is 1."""
+def test_toy_forward_cpu_runs_and_output_correct_dimensions() -> None:
+    """Plumbing proof: real load + forward on CPU; output has correct shapes"""
     toy_forward = _load_toy_forward_module()
     result = toy_forward.run_toy_forward()
 

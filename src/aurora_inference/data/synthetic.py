@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 import torch
 from aurora import Batch, Metadata
 
-from aurora_inference.contract import ModelSpec, validate_input_times
+from aurora_inference.contract import AURORA_PRETRAINED_SPEC, ModelSpec, validate_input_times
 
 __all__ = ["SyntheticSource"]
 
@@ -24,7 +24,8 @@ _INPUT_TIME_STEPS = 2
 _WEATHER_DTYPE = torch.float32
 
 # Physically plausible centers/scales for known Aurora short names.
-# Unknown keys fall back to N(0, 1). Values are decorative — not real earth states
+# Every key in AURORA_PRETRAINED_SPEC must appear here — no silent fallbacks.
+# Values are decorative — not real earth states.
 _SURF_RANGES: dict[str, tuple[float, float]] = {
     "2t": (273.0, 20.0),
     "10u": (0.0, 10.0),
@@ -45,6 +46,24 @@ _ATMOS_RANGES: dict[str, tuple[float, float]] = {
 }
 
 
+def _assert_range_tables_cover_spec(spec: ModelSpec) -> None:
+    """Ensure every variable in ``spec`` has a defined sampling range."""
+    groups: tuple[tuple[str, tuple[str, ...], dict[str, tuple[float, float]]], ...] = (
+        ("surf_vars", spec.surf_vars, _SURF_RANGES),
+        ("static_vars", spec.static_vars, _STATIC_RANGES),
+        ("atmos_vars", spec.atmos_vars, _ATMOS_RANGES),
+    )
+    for group_name, required, ranges in groups:
+        missing = [key for key in required if key not in ranges]
+        if len(missing) > 0:
+            missing_str = ", ".join(missing)
+            msg = f"synthetic {group_name}: missing range entries for {missing_str}"
+            raise AssertionError(msg)
+
+
+_assert_range_tables_cover_spec(AURORA_PRETRAINED_SPEC)
+
+
 @dataclass(frozen=True)
 class SyntheticSource:
     """Seeded synthetic ``BatchSource`` for offline tests.
@@ -62,7 +81,7 @@ class SyntheticSource:
         """Synthesize a contract-shaped batch whose ``metadata.time`` is ``init_time`` (t1)."""
         hours = spec.input_timestep_hours
         t0 = init_time - timedelta(hours=hours)
-        validate_input_times(t0, init_time, hours=hours)
+        validate_input_times(t0=t0, t1=init_time, hours=hours)
 
         generator = torch.Generator()
         generator.manual_seed(self.seed)
@@ -88,17 +107,15 @@ class SyntheticSource:
         static_shape = (self.height, self.width)
 
         surf_vars = {
-            key: self._sample_variable(surf_shape, *_SURF_RANGES.get(key, (0.0, 1.0)), generator)
+            key: self._sample_variable(surf_shape, *_SURF_RANGES[key], generator)
             for key in spec.surf_vars
         }
         static_vars = {
-            key: self._sample_variable(
-                static_shape, *_STATIC_RANGES.get(key, (0.0, 1.0)), generator
-            )
+            key: self._sample_variable(static_shape, *_STATIC_RANGES[key], generator)
             for key in spec.static_vars
         }
         atmos_vars = {
-            key: self._sample_variable(atmos_shape, *_ATMOS_RANGES.get(key, (0.0, 1.0)), generator)
+            key: self._sample_variable(atmos_shape, *_ATMOS_RANGES[key], generator)
             for key in spec.atmos_vars
         }
 

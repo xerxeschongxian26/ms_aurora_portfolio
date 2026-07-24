@@ -25,7 +25,11 @@ Why the shapes differ:
 
 ### Required variables (`AuroraPretrained` / `AuroraSmallPretrained`)
 
-Held in `AURORA_PRETRAINED_SPEC` (`ModelSpec`):
+Input features will vary depending on the underlying model used. Other Aurora variants (`AuroraAirPollution`, `AuroraWave`) have different contracts — deferred beyond Stage 0.
+
+
+The required variables for `AuroraPretrained` (and by extension `AuroraSmallPretrained`)
+are held in `AURORA_PRETRAINED_SPEC` (`ModelSpec`):
 
 | Group | Keys |
 |---|---|
@@ -38,7 +42,6 @@ Held in `AURORA_PRETRAINED_SPEC` (`ModelSpec`):
 
 > **Hardening (deferred):** reject *unknown* keys (keys present in the batch but not in `ModelSpec`) as well. WP2 only requires that every spec key is present — surplus fields pass. Tightening to an exact key set is a reasonable later change; not in Stage 0 acceptance.
 
-Other Aurora variants (`AuroraAirPollution`, `AuroraWave`) have different contracts — deferred beyond Stage 0.
 
 ## Common traps
 
