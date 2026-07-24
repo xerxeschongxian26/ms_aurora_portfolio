@@ -70,9 +70,12 @@ def test_load_model_rejects_unpinned_revision(revision: str) -> None:
 def test_load_model_orchestrates_pinned_ckpt_and_inference_setup(
     model_name: ModelName,
 ) -> None:
-    """
-    Test that load_model() prepares an inference-ready model on the
-    requested device
+    """Test that load_model() prepares an inference-ready model on the requested device.
+
+    Uses a MagicMock in place of a real Aurora model (_build_model is patched).
+    Calls to load_checkpoint(), eval(), and to() are no-ops: they do not download
+    from HuggingFace or run PyTorch; they only record that load_model invoked them.
+    Assertions inspect that call history (wiring + pinned HF args), not checkpoint bytes.
 
     Sub-behaviours:
     - build the right model class
@@ -87,7 +90,7 @@ def test_load_model_orchestrates_pinned_ckpt_and_inference_setup(
     with patch("aurora_inference.model.loader._build_model", return_value=fake_model) as build:
         result = load_model(model_name, device="cpu")
 
-    # Asset sub-behavious listed above
+    # Assert sub-behaviours listed above
     build.assert_called_once_with(model_name)
     fake_model.load_checkpoint.assert_called_once_with(
         repo=AURORA_HF_REPO_ID,
@@ -100,15 +103,21 @@ def test_load_model_orchestrates_pinned_ckpt_and_inference_setup(
 
 
 def test_load_model_forwards_explicit_pinned_revision_override() -> None:
-    override = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    """Test that an explicit pinned revision override is forwarded to load_checkpoint.
+
+    Same no-op mock pattern as test_load_model_orchestrates_pinned_ckpt_and_inference_setup:
+    fake_model.load_checkpoint() records the call without contacting HuggingFace.
+    Proves only that an explicit revision = revision_override is forwarded to load_checkpoint
+    """
+    revision_override = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     fake_model = MagicMock()
     fake_model.to.return_value = fake_model
 
     with patch("aurora_inference.model.loader._build_model", return_value=fake_model):
-        load_model("aurora-small-pretrained", revision=override)
+        load_model("aurora-small-pretrained", revision=revision_override)
 
     fake_model.load_checkpoint.assert_called_once_with(
         repo=AURORA_HF_REPO_ID,
         name=_EXPECTED_FILENAMES["aurora-small-pretrained"],
-        revision=override,
+        revision=revision_override,
     )
