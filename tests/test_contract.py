@@ -92,11 +92,22 @@ def test_validate_batch_rejects_static_wrong_rank() -> None:
         validate_batch(batch, AURORA_PRETRAINED_SPEC)
 
 
-def test_validate_batch_rejects_inconsistent_spatial_dims() -> None:
+def test_validate_batch_rejects_inconsistent_spatial_dims_latitude() -> None:
     batch = make_valid_batch()
     height, width = batch.spatial_shape
     atmos_vars = dict(batch.atmos_vars)
     atmos_vars["t"] = torch.zeros(1, 2, len(AURORA_PRETRAINED_SPEC.atmos_levels), height + 1, width)
+    batch = replace(batch, atmos_vars=atmos_vars)
+
+    with pytest.raises(BatchContractError, match=r"atmos_vars\['t'\]:"):
+        validate_batch(batch, AURORA_PRETRAINED_SPEC)
+
+
+def test_validate_batch_rejects_inconsistent_spatial_dim_longitude() -> None:
+    batch = make_valid_batch()
+    height, width = batch.spatial_shape
+    atmos_vars = dict(batch.atmos_vars)
+    atmos_vars["t"] = torch.zeros(1, 2, len(AURORA_PRETRAINED_SPEC.atmos_levels), height, width + 1)
     batch = replace(batch, atmos_vars=atmos_vars)
 
     with pytest.raises(BatchContractError, match=r"atmos_vars\['t'\]:"):
@@ -125,14 +136,6 @@ def test_validate_batch_rejects_ascending_lat() -> None:
         validate_batch(batch, AURORA_PRETRAINED_SPEC)
 
 
-def test_validate_batch_rejects_lon_including_360() -> None:
-    batch = make_valid_batch()
-    batch.metadata.lon[-1] = 360.0
-
-    with pytest.raises(BatchContractError, match=r"metadata.lon: coordinate range"):
-        validate_batch(batch, AURORA_PRETRAINED_SPEC)
-
-
 def test_validate_batch_rejects_lon_length_mismatch() -> None:
     batch = make_valid_batch()
     metadata = replace(batch.metadata, lon=batch.metadata.lon[:-1])
@@ -152,6 +155,14 @@ def test_validate_batch_rejects_non_increasing_lon() -> None:
         BatchContractError,
         match=r"metadata.lon: order \(received non-increasing, expected strictly increasing\)",
     ):
+        validate_batch(batch, AURORA_PRETRAINED_SPEC)
+
+
+def test_validate_batch_rejects_lon_including_360() -> None:
+    batch = make_valid_batch()
+    batch.metadata.lon[-1] = 360.0
+
+    with pytest.raises(BatchContractError, match=r"metadata.lon: coordinate range"):
         validate_batch(batch, AURORA_PRETRAINED_SPEC)
 
 
