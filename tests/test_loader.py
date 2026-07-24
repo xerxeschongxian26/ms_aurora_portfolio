@@ -67,15 +67,27 @@ def test_load_model_rejects_unpinned_revision(revision: str) -> None:
 
 
 @pytest.mark.parametrize("model_name", list(CHECKPOINT_REGISTRY))
-def test_load_model_pins_revision_and_returns_eval_model_on_device(
+def test_load_model_orchestrates_pinned_ckpt_and_inference_setup(
     model_name: ModelName,
 ) -> None:
+    """
+    Test that load_model() prepares an inference-ready model on the
+    requested device
+
+    Sub-behaviours:
+    - build the right model class
+    - load checkpoint with pinned HF args
+    - call eval()
+    - move to device and return
+    """
     fake_model = MagicMock()
     fake_model.to.return_value = fake_model
 
+    # Stub _build_model() so load_model gets fake_model instead of a real Aurora class.
     with patch("aurora_inference.model.loader._build_model", return_value=fake_model) as build:
         result = load_model(model_name, device="cpu")
 
+    # Asset sub-behavious listed above
     build.assert_called_once_with(model_name)
     fake_model.load_checkpoint.assert_called_once_with(
         repo=AURORA_HF_REPO_ID,
