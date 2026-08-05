@@ -25,6 +25,7 @@ from aurora_inference.model.loader import _FORBIDDEN_REVISIONS, load_model
 _EXPECTED_FILENAMES: dict[ModelName, str] = {
     "aurora-small-pretrained": "aurora-0.25-small-pretrained.ckpt",
     "aurora-pretrained": "aurora-0.25-pretrained.ckpt",
+    "aurora-finetuned": "aurora-0.25-finetuned.ckpt",
 }
 _EXPECTED_HEX_CHARACTERS = string.hexdigits.lower()
 
