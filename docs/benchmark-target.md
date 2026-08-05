@@ -10,6 +10,9 @@ Below are the three benchmark target figures referenced from the Aurora paper (s
 <p align="center">
   <img src="images/supinfo_figure_h7_rmse_headline_vars.png" alt="Figure H7: Absolute RMSE – headline variables (z500, t850)" width="650"/>
 </p>
+
+The term headline variables is borrowed from the WeatherBench2 terminology, which are specific variables classified by the European Centre for Medium-Range Weather Forecasts (ECMWF) as being adequate summaries for the quality of medium-range forecasts.
+
 <p align="center">
   <img src="images/supinfo_figure_h8_rmse_lower_atmosphere.png" alt="Figure H8: Absolute RMSE – lower atmosphere" width="650"/>
 </p>
