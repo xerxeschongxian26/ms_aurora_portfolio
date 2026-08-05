@@ -26,7 +26,7 @@ __all__ = [
 AURORA_HF_REPO_ID = "microsoft/aurora"
 AURORA_HF_REVISION = "0be7e57c685dac86b78c4a19a3ab149d13c6a3dd"  # pragma: allowlist secret
 
-ModelName = Literal["aurora-small-pretrained", "aurora-pretrained"]
+ModelName = Literal["aurora-small-pretrained", "aurora-pretrained", "aurora-finetuned"]
 
 
 @dataclass(frozen=True)
@@ -47,6 +47,10 @@ CHECKPOINT_REGISTRY: dict[ModelName, CheckpointConfig] = {
     "aurora-pretrained": CheckpointConfig(
         model_name="aurora-pretrained",
         checkpoint_filename="aurora-0.25-pretrained.ckpt",
+    ),
+    "aurora-finetuned": CheckpointConfig(
+        model_name="aurora-finetuned",
+        checkpoint_filename="aurora-0.25-finetuned.ckpt",
     ),
 }
 
