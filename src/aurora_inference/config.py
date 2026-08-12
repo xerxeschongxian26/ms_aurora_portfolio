@@ -25,6 +25,7 @@ __all__ = [
 # HF git commit SHA matching microsoft-aurora==1.8.0 defaults. Do not use "main".
 AURORA_HF_REPO_ID = "microsoft/aurora"
 AURORA_HF_REVISION = "0be7e57c685dac86b78c4a19a3ab149d13c6a3dd"  # pragma: allowlist secret
+GCS_STORE_LINK: str = "gs://weatherbench2/datasets/hres_t0/2016-2022-6h-1440x721.zarr"
 
 ModelName = Literal["aurora-small-pretrained", "aurora-pretrained", "aurora-finetuned"]
 
