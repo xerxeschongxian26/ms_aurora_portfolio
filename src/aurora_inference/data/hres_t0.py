@@ -42,11 +42,12 @@ import zarr
 from aurora import Batch, Metadata
 
 from aurora_inference.contract import AURORA_PRETRAINED_SPEC, ModelSpec, validate_input_times
-from aurora_inference.data.static_vars import get_hres_t0_static
 
 __all__ = ["HresT0Source"]
 
 _WEATHER_DTYPE = torch.float32
+OUT_SAMPLE_START = pd.Timestamp("2022-01-01 00:00:00")
+OUT_SAMPLE_END = pd.Timestamp("2023-01-01 00:00:00")
 
 # Aurora short name -> WeatherBench2 HRES-T0 long name. See docs/hres-t0-source-notes.md
 # for the full variable table. Static vars are deliberately excluded here: they are
@@ -157,19 +158,16 @@ class HresT0Source:
         prev_time = init_time - timedelta(hours=hours)
         validate_input_times(t0=prev_time, t1=init_time, hours=hours)
 
-        # establish connection to GCS,
-        self._open_connection_to_gcs()  # PROBLEM:: opens a new GCSFS connection on every .load()
-
-        # static variable
-        self.STATIC_VARS = get_hres_t0_static()
-
-        # time stamp validity and indices
-        # PROBLEM:: edge case when init_time is the beginning of the out_sample period
-        # prev_time will fall out of the out_sample by definition
-        # Will also reject prev_time for having a hour value = 18 or 6
-        self._check_timestamp_valid(prev_time, self.ZARR_DATA)
-        self._check_timestamp_valid(init_time, self.ZARR_DATA)
-        timestamp_indices = self._get_timestamp_indices([prev_time, init_time])
+        self._check_timestamp_valid(
+            single_timestamp=prev_time,
+            allowed_hours=(18, 6),
+            tolerance=hours,
+            zarr_data=self.ZARR_DATA,
+        )
+        self._check_timestamp_valid(
+            single_timestamp=init_time, allowed_hours=(0, 12), tolerance=0, zarr_data=self.ZARR_DATA
+        )
+        timestamp_indices = self._get_timestamp_indices([prev_time, init_time], self.ZARR_DATA)
 
         # pressure level validity
         pressure_levels = tuple(int(x) for x in self.ZARR_DATA["level"][:])
@@ -206,40 +204,45 @@ class HresT0Source:
         )
 
     @staticmethod
-    def _check_timestamp_valid(single_timestamp: datetime, zarr_data: zarr.Group):
-        out_sample_start = pd.Timestamp("2022-01-01 00:00:00")
-        out_sample_end = pd.Timestamp("2023-01-01 00:00:00")
-        times = pd.to_datetime(zarr_data["time"][:], unit="h", origin="2016-01-01")
+    def _check_timestamp_valid(
+        single_timestamp: datetime,
+        allowed_hours: tuple[int, int],
+        tolerance: int,
+        zarr_data: zarr.Group,
+    ) -> None:
 
-        is_valid_hour = single_timestamp.hour in [0, 12]
-        is_in_out_sample_period = (single_timestamp >= out_sample_start) & (
-            single_timestamp < out_sample_end
+        times = pd.to_datetime(zarr_data["time"][:], unit="h", origin="2016-01-01")
+        adjusted_out_sample_start = OUT_SAMPLE_START - timedelta(hours=tolerance)
+
+        is_valid_hour = single_timestamp.hour in allowed_hours
+        is_in_out_sample_period = (single_timestamp >= adjusted_out_sample_start) & (
+            single_timestamp < OUT_SAMPLE_END
         )
 
         if single_timestamp not in times:
             raise InvalidInitTimeError(f"{single_timestamp} is not found within the HRES_T0 source")
         elif not is_valid_hour:
             raise InvalidInitTimeError(
-                f"{single_timestamp} can only take hour values of 00UTC or 12UTC"
+                f"{single_timestamp} can only take hour values of"
+                f"{allowed_hours[0]}UTC or {allowed_hours[1]}UTC"
             )
         elif not is_in_out_sample_period:
             raise InvalidInitTimeError(
                 f"{single_timestamp} must lie within the out-sample period "
-                f"{out_sample_start} to {out_sample_end}(exclusive)"
+                f"{adjusted_out_sample_start} to {OUT_SAMPLE_END}(exclusive)"
             )
-
         else:
             return
 
     @staticmethod
-    def _get_timestamp_indices(time_stamps: list[datetime], zarr_data: zarr.Group):
+    def _get_timestamp_indices(time_stamps: list[datetime], zarr_data: zarr.Group) -> np.ndarray:
         times = pd.to_datetime(zarr_data["time"][:], unit="h", origin="2016-01-01")
-        return np.where(np.isin(times, time_stamps))[0]
+        return np.where(times.isin(time_stamps))[0]
 
     @staticmethod
     def _check_pressure_levels_valid(
         pressure_levels: tuple[int, ...], reference_pressure_levels: tuple[int, ...]
-    ):
+    ) -> None:
         if pressure_levels != reference_pressure_levels:
             raise InvalidPressureLevels(
                 f"Pressure levels {pressure_levels} do not"
@@ -248,7 +251,12 @@ class HresT0Source:
         else:
             return
 
-    def _open_connection_to_gcs(self) -> None:
-        fs = gcsfs.GCSFileSystem(token="anon")
-        store = fs.get_mapper(self.GCS_STORE_LINK)
-        self.ZARR_DATA = zarr.open(store, mode="r")
+
+def open_connection_to_gcs(gcs_store_link: str) -> zarr.Group:
+    fs = gcsfs.GCSFileSystem(token="anon")
+    store = fs.get_mapper(gcs_store_link)
+    result = zarr.open(store, mode="r")
+    assert isinstance(result, zarr.Group), (
+        f"expected a zarr.Group at {gcs_store_link}, got {type(result)}"
+    )
+    return result
