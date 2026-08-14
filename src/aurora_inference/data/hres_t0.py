@@ -156,7 +156,9 @@ class HresT0Source:
 
         metadata = Metadata(
             lat=torch.tensor(
-                _flip_to_descending(self.ZARR_DATA["latitude"][:], axis=0),  # (H,) -> axis 0
+                # (H,) is 1D, so axis=-2 is out of bounds here - unlike the (B,T,H,W)/
+                # (B,T,L,H,W)/(H,W) tensors above, H is axis 0, not second-to-last.
+                _flip_to_descending(self.ZARR_DATA["latitude"][:], axis=0),
                 dtype=torch.float32,
             ),
             lon=torch.tensor(self.ZARR_DATA["longitude"][:], dtype=torch.float32),
@@ -229,7 +231,7 @@ def _load_surf_var(
     ``metadata.lat`` flip applied below. Returns a ``(1, 2, H, W)`` ``float32`` tensor.
     """
     array = zarr_data[wb2_name][timestep_indices, :][None]
-    array = _flip_to_descending(array, axis=2)  # (B, T, H, W) -> H is axis 2
+    array = _flip_to_descending(array, axis=-2)  # (B, T, H, W) -> H is second-to-last
     return torch.tensor(array, dtype=_WEATHER_DTYPE)
 
 
@@ -242,13 +244,13 @@ def _load_atmos_var(
     ``(1, 2, L, H, W)`` ``float32`` tensor.
     """
     array = zarr_data[wb2_name][timestep_indices, :, :][None]
-    array = _flip_to_descending(array, axis=3)  # (B, T, L, H, W) -> H is axis 3
+    array = _flip_to_descending(array, axis=-2)  # (B, T, L, H, W) -> H is second-to-last
     return torch.tensor(array, dtype=_WEATHER_DTYPE)
 
 
 def _load_static_var(static_vars: dict, key: str) -> torch.Tensor:
     """Flip a cached ``(H, W)`` static variable's H axis to descending, cast to float32."""
-    array = _flip_to_descending(static_vars[key][:], axis=0)  # (H, W) -> H is axis 0
+    array = _flip_to_descending(static_vars[key][:], axis=-2)  # (H, W) -> H is second-to-last
     return torch.tensor(array, dtype=_WEATHER_DTYPE)
 
 
