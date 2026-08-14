@@ -52,7 +52,7 @@ OUT_SAMPLE_END = pd.Timestamp("2023-01-01 00:00:00")
 # Aurora short name -> WeatherBench2 HRES-T0 long name. See docs/hres-t0-source-notes.md
 # for the full variable table. Static vars are deliberately excluded here: they are
 # sourced from Microsoft's official static pickle (static_vars.py), not from the WB2
-# zarr store, and already use Aurora's short names as-is hence no renaming needed
+# zarr store, and already use Aurora's short names hence no renaming/remapping needed
 
 # Maps Aurora Batch contract name to its respective hres_t0 name
 _SURF_NAME_MAP: dict[str, str] = {
@@ -87,50 +87,14 @@ def _assert_name_maps_cover_spec(spec: ModelSpec) -> None:
 _assert_name_maps_cover_spec(AURORA_PRETRAINED_SPEC)
 
 
-def _flip_to_descending(array: np.ndarray, *, axis: int) -> np.ndarray:
-    """Reverse ``array`` along ``axis`` and return a contiguous copy.
-
-    Converts HRES-T0's native ascending latitude into Aurora's required descending
-    order. Every tensor that shares this coordinate (surf/atmos/static data, and the
-    ``lat`` coordinate itself) must flip its *matching* axis - see
-    docs/batch-contract.md's lockstep flip rule.
-
-    The ``.copy()`` is required, not cosmetic: ``np.flip`` returns a negative-stride
-    view, and ``torch.tensor()`` cannot consume negative strides.
-    """
-    return np.flip(array, axis=axis).copy()
-
-
-def _load_surf_var(
-    zarr_data: zarr.Group, wb2_name: str, timestep_indices: np.ndarray
-) -> torch.Tensor:
-    """Select the two input timesteps of a ``(time, lat, lon)`` surface variable.
-
-    Adds the batch axis and flips the H (latitude) axis to descending, matching the
-    ``metadata.lat`` flip applied below. Returns a ``(1, 2, H, W)`` ``float32`` tensor.
-    """
-    array = zarr_data[wb2_name][timestep_indices, :][None]
-    array = _flip_to_descending(array, axis=2)  # (B, T, H, W) -> H is axis 2
-    return torch.tensor(array, dtype=_WEATHER_DTYPE)
-
-
-def _load_atmos_var(
-    zarr_data: zarr.Group, wb2_name: str, timestep_indices: np.ndarray
-) -> torch.Tensor:
-    """Select the two input timesteps of a ``(time, level, lat, lon)`` atmospheric variable.
-
-    Adds the batch axis and flips the H (latitude) axis to descending. Returns a
-    ``(1, 2, L, H, W)`` ``float32`` tensor.
-    """
-    array = zarr_data[wb2_name][timestep_indices, :, :][None]
-    array = _flip_to_descending(array, axis=3)  # (B, T, L, H, W) -> H is axis 3
-    return torch.tensor(array, dtype=_WEATHER_DTYPE)
-
-
-def _load_static_var(static_vars: dict, key: str) -> torch.Tensor:
-    """Flip a cached ``(H, W)`` static variable's H axis to descending, cast to float32."""
-    array = _flip_to_descending(static_vars[key][:], axis=0)  # (H, W) -> H is axis 0
-    return torch.tensor(array, dtype=_WEATHER_DTYPE)
+def open_connection_to_gcs(gcs_store_link: str) -> zarr.Group:
+    fs = gcsfs.GCSFileSystem(token="anon")
+    store = fs.get_mapper(gcs_store_link)
+    result = zarr.open(store, mode="r")
+    assert isinstance(result, zarr.Group), (
+        f"expected a zarr.Group at {gcs_store_link}, got {type(result)}"
+    )
+    return result
 
 
 class InvalidInitTimeError(Exception):
@@ -153,11 +117,12 @@ class HresT0Source:
     batch_size: int = 1
 
     def load(self, init_time: datetime, spec: ModelSpec) -> Batch:
-        """Consturct a contract-shaped, single dimension Batch object from the HRES_T0 source"""
+        """Construct a contract-shaped, single dimension Batch object from the HRES_T0 source"""
         hours = spec.input_timestep_hours
         prev_time = init_time - timedelta(hours=hours)
         validate_input_times(t0=prev_time, t1=init_time, hours=hours)
 
+        # timestamp validity
         self._check_timestamp_valid(
             single_timestamp=prev_time,
             allowed_hours=(18, 6),
@@ -165,7 +130,10 @@ class HresT0Source:
             zarr_data=self.ZARR_DATA,
         )
         self._check_timestamp_valid(
-            single_timestamp=init_time, allowed_hours=(0, 12), tolerance=0, zarr_data=self.ZARR_DATA
+            single_timestamp=init_time,
+            allowed_hours=(0, 12),
+            tolerance=0,
+            zarr_data=self.ZARR_DATA
         )
         timestamp_indices = self._get_timestamp_indices([prev_time, init_time], self.ZARR_DATA)
 
@@ -252,11 +220,49 @@ class HresT0Source:
             return
 
 
-def open_connection_to_gcs(gcs_store_link: str) -> zarr.Group:
-    fs = gcsfs.GCSFileSystem(token="anon")
-    store = fs.get_mapper(gcs_store_link)
-    result = zarr.open(store, mode="r")
-    assert isinstance(result, zarr.Group), (
-        f"expected a zarr.Group at {gcs_store_link}, got {type(result)}"
-    )
-    return result
+def _load_surf_var(
+    zarr_data: zarr.Group, wb2_name: str, timestep_indices: np.ndarray
+) -> torch.Tensor:
+    """Select the two input timesteps of a ``(time, lat, lon)`` surface variable.
+
+    Adds the batch axis and flips the H (latitude) axis to descending, matching the
+    ``metadata.lat`` flip applied below. Returns a ``(1, 2, H, W)`` ``float32`` tensor.
+    """
+    array = zarr_data[wb2_name][timestep_indices, :][None]
+    array = _flip_to_descending(array, axis=2)  # (B, T, H, W) -> H is axis 2
+    return torch.tensor(array, dtype=_WEATHER_DTYPE)
+
+
+def _load_atmos_var(
+    zarr_data: zarr.Group, wb2_name: str, timestep_indices: np.ndarray
+) -> torch.Tensor:
+    """Select the two input timesteps of a ``(time, level, lat, lon)`` atmospheric variable.
+
+    Adds the batch axis and flips the H (latitude) axis to descending. Returns a
+    ``(1, 2, L, H, W)`` ``float32`` tensor.
+    """
+    array = zarr_data[wb2_name][timestep_indices, :, :][None]
+    array = _flip_to_descending(array, axis=3)  # (B, T, L, H, W) -> H is axis 3
+    return torch.tensor(array, dtype=_WEATHER_DTYPE)
+
+
+def _load_static_var(static_vars: dict, key: str) -> torch.Tensor:
+    """Flip a cached ``(H, W)`` static variable's H axis to descending, cast to float32."""
+    array = _flip_to_descending(static_vars[key][:], axis=0)  # (H, W) -> H is axis 0
+    return torch.tensor(array, dtype=_WEATHER_DTYPE)
+
+
+def _flip_to_descending(array: np.ndarray, *, axis: int) -> np.ndarray:
+    """Reverse ``array`` along ``axis`` and return a contiguous copy.
+
+    Converts HRES-T0's native ascending latitude into Aurora's required descending
+    order. Every tensor that shares this coordinate (surf/atmos/static data, and the
+    ``lat`` coordinate itself) must flip its *matching* axis - see
+    docs/batch-contract.md's lockstep flip rule.
+
+    The ``.copy()`` is required, not cosmetic: ``np.flip`` returns a negative-stride
+    view, and ``torch.tensor()`` cannot consume negative strides.
+    """
+    return np.flip(array, axis=axis).copy()
+
+    
