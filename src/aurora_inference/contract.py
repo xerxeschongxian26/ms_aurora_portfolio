@@ -193,7 +193,7 @@ def validate_batch(batch: Batch, spec: ModelSpec) -> None:
 
 def _validate_required_keys(batch: Batch, spec: ModelSpec) -> None:
     """Ensure every variable required by ``spec`` is present in ``batch``.
-       and every variable in ``batch`` is in ``spec``
+    and every variable in ``batch`` is in ``spec``
     """
     groups: tuple[tuple[str, tuple[str, ...], dict[str, torch.Tensor]], ...] = (
         ("surf_vars", spec.surf_vars, batch.surf_vars),
@@ -221,8 +221,6 @@ def _validate_required_keys(batch: Batch, spec: ModelSpec) -> None:
                 f"(received keys {{{received_str}}}, expected keys {{{expected_str}}})"
             )
             raise BatchContractError(msg)
-
-        
 
 
 def _validate_tensor_shapes(batch: Batch, spec: ModelSpec) -> int:

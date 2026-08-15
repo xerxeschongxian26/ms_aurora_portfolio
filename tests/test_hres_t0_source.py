@@ -19,7 +19,7 @@ from aurora_inference.contract import (
     BatchContractError,
     validate_batch,
 )
-from aurora_inference.data.hres_t0 import HresT0Source
+from aurora_inference.data.hres_t0 import HresT0Source, _read_zarr_array
 
 _LEVEL_500_HPA = 500
 
@@ -36,8 +36,8 @@ def test_orientation_lat_descending_lon_passthrough(
 ) -> None:
     """Lat is flipped to descending; lon is passthrough; field values match the flipped grid."""
     batch = hres_t0_source.load(HRES_T0_FIXTURE_INIT_TIME, AURORA_PRETRAINED_SPEC)
-    raw_lat = np.asarray(hres_t0_zarr["latitude"][:], dtype=np.float32)
-    raw_lon = np.asarray(hres_t0_zarr["longitude"][:], dtype=np.float32)
+    raw_lat = _read_zarr_array(hres_t0_zarr, "latitude").astype(np.float32)
+    raw_lon = _read_zarr_array(hres_t0_zarr, "longitude").astype(np.float32)
 
     lat = batch.metadata.lat
     assert torch.all(lat[:-1] > lat[1:]), "metadata.lat must be strictly decreasing"
@@ -53,7 +53,9 @@ def test_orientation_lat_descending_lon_passthrough(
 
     # Physical anchor: 2t at t1 on the flipped H axis matches raw zarr with np.flip on H.
     timestep_indices = np.array([0, 1])
-    raw_2t_t1 = hres_t0_zarr["2m_temperature"][timestep_indices[1], :, :]
+    raw_2t_t1 = _read_zarr_array(
+        hres_t0_zarr, "2m_temperature", (timestep_indices[1], slice(None), slice(None))
+    )
     expected_2t_t1 = np.flip(raw_2t_t1, axis=0).copy()
     loaded_2t_t1 = batch.surf_vars["2t"][0, 1].numpy()
     assert np.allclose(loaded_2t_t1, expected_2t_t1)
@@ -84,12 +86,16 @@ def test_atmos_levels_and_z500_index(
     )
 
     level_idx_500 = AURORA_PRETRAINED_SPEC.atmos_levels.index(_LEVEL_500_HPA)
-    store_levels = [int(x) for x in hres_t0_zarr["level"][:]]
+    store_levels = [int(x) for x in _read_zarr_array(hres_t0_zarr, "level")]
     store_idx_500 = store_levels.index(_LEVEL_500_HPA)
     assert level_idx_500 == store_idx_500
 
     timestep_indices = np.array([0, 1])
-    raw_z500_t1 = hres_t0_zarr["geopotential"][timestep_indices[1], store_idx_500, :, :]
+    raw_z500_t1 = _read_zarr_array(
+        hres_t0_zarr,
+        "geopotential",
+        (timestep_indices[1], store_idx_500, slice(None), slice(None)),
+    )
     expected_z500_t1 = np.flip(raw_z500_t1, axis=0).copy()
     loaded_z500_t1 = batch.atmos_vars["z"][0, 1, level_idx_500].numpy()
     assert np.allclose(loaded_z500_t1, expected_z500_t1)

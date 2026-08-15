@@ -5,7 +5,6 @@ from __future__ import annotations
 import pickle
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pytest
@@ -18,7 +17,7 @@ from aurora_inference.contract import (
     ModelSpec,
     validate_batch,
 )
-from aurora_inference.data.hres_t0 import HresT0Source
+from aurora_inference.data.hres_t0 import HresT0Source, _read_zarr_array
 from aurora_inference.data.static_vars import EXPECTED_DIMENSIONS as _STATIC_FULL_SHAPE
 
 _INPUT_TIME_STEPS = 2
@@ -42,8 +41,8 @@ def _aurora_full_grid_coords() -> tuple[np.ndarray, np.ndarray]:
 
 def _spatial_slice_for_fixture(zarr_data: zarr.Group) -> tuple[slice, slice]:
     """Return ``(lat_slice, lon_slice)`` aligning full static arrays to a fixture zarr group."""
-    fixture_lat = np.asarray(zarr_data["latitude"][:], dtype=np.float32)
-    fixture_lon = np.asarray(zarr_data["longitude"][:], dtype=np.float32)
+    fixture_lat = _read_zarr_array(zarr_data, "latitude").astype(np.float32)
+    fixture_lon = _read_zarr_array(zarr_data, "longitude").astype(np.float32)
     full_lat, full_lon = _aurora_full_grid_coords()
 
     lat_start = int(np.where(np.isclose(full_lat, fixture_lat[0]))[0][0])
@@ -78,7 +77,7 @@ def load_hres_t0_fixture_static(
     *,
     zarr_data: zarr.Group | None = None,
     path: Path = HRES_T0_FIXTURE_STATIC,
-) -> dict[str, Any]:
+) -> dict[str, np.ndarray]:
     """Load static vars cropped to match ``zarr_data``'s lat/lon extent.
 
     ``hres_t0_static.pickle`` holds the full 721×1440 HF static fields; the zarr
@@ -101,7 +100,7 @@ def load_hres_t0_fixture_static(
 def make_hres_t0_source(
     *,
     zarr_data: zarr.Group | None = None,
-    static_vars: dict[str, Any] | None = None,
+    static_vars: dict[str, np.ndarray] | None = None,
 ) -> HresT0Source:
     """Build an ``HresT0Source`` wired to the committed offline fixtures."""
     if zarr_data is None:
@@ -162,12 +161,12 @@ def hres_t0_zarr() -> zarr.Group:
 
 
 @pytest.fixture
-def hres_t0_static(hres_t0_zarr: zarr.Group) -> dict[str, Any]:
+def hres_t0_static(hres_t0_zarr: zarr.Group) -> dict[str, np.ndarray]:
     """Static vars cropped to ``hres_t0_zarr``'s lat/lon window."""
     return load_hres_t0_fixture_static(zarr_data=hres_t0_zarr)
 
 
 @pytest.fixture
-def hres_t0_source(hres_t0_zarr: zarr.Group, hres_t0_static: dict[str, Any]) -> HresT0Source:
+def hres_t0_source(hres_t0_zarr: zarr.Group, hres_t0_static: dict[str, np.ndarray]) -> HresT0Source:
     """``HresT0Source`` backed by committed fixtures — no network in CI."""
     return make_hres_t0_source(zarr_data=hres_t0_zarr, static_vars=hres_t0_static)

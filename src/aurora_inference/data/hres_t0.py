@@ -33,6 +33,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Any, cast
 
 import gcsfs
 import numpy as np
@@ -87,6 +88,29 @@ def _assert_name_maps_cover_spec(spec: ModelSpec) -> None:
 _assert_name_maps_cover_spec(AURORA_PRETRAINED_SPEC)
 
 
+def _read_zarr_array(
+    group: zarr.Group,
+    key: str,
+    index: tuple[Any, ...] | None = None,
+) -> np.ndarray:
+    """Read a zarr array (optionally indexed) as a concrete ``np.ndarray``.
+
+    zarr's stubs type ``group[key]`` too loosely for strict mypy; this helper
+    narrows at the I/O boundary where HRES-T0 weather fields become NumPy.
+    """
+    node = group[key]
+    array_node = cast(Any, node)
+    if index is None:
+        return np.asarray(array_node[:])
+    return np.asarray(array_node[index])
+
+
+def _read_zarr_time_index(zarr_data: zarr.Group) -> pd.DatetimeIndex:
+    """Parse HRES-T0 hour-offset ``time`` coordinates as a ``DatetimeIndex``."""
+    time_hours = _read_zarr_array(zarr_data, "time").astype(np.int64, copy=False)
+    return pd.to_datetime(time_hours * 3_600, unit="s", origin="2016-01-01")
+
+
 def open_connection_to_gcs(gcs_store_link: str) -> zarr.Group:
     fs = gcsfs.GCSFileSystem(token="anon")
     store = fs.get_mapper(gcs_store_link)
@@ -113,7 +137,7 @@ class HresT0Source:
     """
 
     ZARR_DATA: zarr.Group
-    STATIC_VARS: dict
+    STATIC_VARS: dict[str, np.ndarray]
     batch_size: int = 1
 
     def load(self, init_time: datetime, spec: ModelSpec) -> Batch:
@@ -130,15 +154,12 @@ class HresT0Source:
             zarr_data=self.ZARR_DATA,
         )
         self._check_timestamp_valid(
-            single_timestamp=init_time,
-            allowed_hours=(0, 12),
-            tolerance=0,
-            zarr_data=self.ZARR_DATA
+            single_timestamp=init_time, allowed_hours=(0, 12), tolerance=0, zarr_data=self.ZARR_DATA
         )
         timestamp_indices = self._get_timestamp_indices([prev_time, init_time], self.ZARR_DATA)
 
         # pressure level validity
-        pressure_levels = tuple(int(x) for x in self.ZARR_DATA["level"][:])
+        pressure_levels = tuple(int(x) for x in _read_zarr_array(self.ZARR_DATA, "level"))
         self._check_pressure_levels_valid(pressure_levels, spec.atmos_levels)
 
         # Fetch exactly the variables `spec` requires - not a hardcoded set - so a
@@ -158,10 +179,10 @@ class HresT0Source:
             lat=torch.tensor(
                 # (H,) is 1D, so axis=-2 is out of bounds here - unlike the (B,T,H,W)/
                 # (B,T,L,H,W)/(H,W) tensors above, H is axis 0, not second-to-last.
-                _flip_to_descending(self.ZARR_DATA["latitude"][:], axis=0),
+                _flip_to_descending(_read_zarr_array(self.ZARR_DATA, "latitude"), axis=0),
                 dtype=torch.float32,
             ),
-            lon=torch.tensor(self.ZARR_DATA["longitude"][:], dtype=torch.float32),
+            lon=torch.tensor(_read_zarr_array(self.ZARR_DATA, "longitude"), dtype=torch.float32),
             time=(init_time,),
             atmos_levels=pressure_levels,
         )
@@ -181,7 +202,7 @@ class HresT0Source:
         zarr_data: zarr.Group,
     ) -> None:
 
-        times = pd.to_datetime(zarr_data["time"][:], unit="h", origin="2016-01-01")
+        times = _read_zarr_time_index(zarr_data)
         adjusted_out_sample_start = OUT_SAMPLE_START - timedelta(hours=tolerance)
 
         is_valid_hour = single_timestamp.hour in allowed_hours
@@ -206,8 +227,8 @@ class HresT0Source:
 
     @staticmethod
     def _get_timestamp_indices(time_stamps: list[datetime], zarr_data: zarr.Group) -> np.ndarray:
-        times = pd.to_datetime(zarr_data["time"][:], unit="h", origin="2016-01-01")
-        return np.where(times.isin(time_stamps))[0]
+        times = _read_zarr_time_index(zarr_data)
+        return np.asarray(np.where(times.isin(time_stamps))[0])
 
     @staticmethod
     def _check_pressure_levels_valid(
@@ -230,7 +251,7 @@ def _load_surf_var(
     Adds the batch axis and flips the H (latitude) axis to descending, matching the
     ``metadata.lat`` flip applied below. Returns a ``(1, 2, H, W)`` ``float32`` tensor.
     """
-    array = zarr_data[wb2_name][timestep_indices, :][None]
+    array = _read_zarr_array(zarr_data, wb2_name, (timestep_indices, slice(None)))[None]
     array = _flip_to_descending(array, axis=-2)  # (B, T, H, W) -> H is second-to-last
     return torch.tensor(array, dtype=_WEATHER_DTYPE)
 
@@ -243,14 +264,16 @@ def _load_atmos_var(
     Adds the batch axis and flips the H (latitude) axis to descending. Returns a
     ``(1, 2, L, H, W)`` ``float32`` tensor.
     """
-    array = zarr_data[wb2_name][timestep_indices, :, :][None]
+    array = _read_zarr_array(zarr_data, wb2_name, (timestep_indices, slice(None), slice(None)))[
+        None
+    ]
     array = _flip_to_descending(array, axis=-2)  # (B, T, L, H, W) -> H is second-to-last
     return torch.tensor(array, dtype=_WEATHER_DTYPE)
 
 
-def _load_static_var(static_vars: dict, key: str) -> torch.Tensor:
+def _load_static_var(static_vars: dict[str, np.ndarray], key: str) -> torch.Tensor:
     """Flip a cached ``(H, W)`` static variable's H axis to descending, cast to float32."""
-    array = _flip_to_descending(static_vars[key][:], axis=-2)  # (H, W) -> H is second-to-last
+    array = _flip_to_descending(static_vars[key], axis=-2)  # (H, W) -> H is second-to-last
     return torch.tensor(array, dtype=_WEATHER_DTYPE)
 
 
@@ -266,5 +289,3 @@ def _flip_to_descending(array: np.ndarray, *, axis: int) -> np.ndarray:
     view, and ``torch.tensor()`` cannot consume negative strides.
     """
     return np.flip(array, axis=axis).copy()
-
-    

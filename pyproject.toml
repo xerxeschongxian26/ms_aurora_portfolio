@@ -19,7 +19,9 @@ dev = [
     "ruff>=0.15.0",
     "mypy>=1.20.0",
     "pre-commit>=4.6.0",
-
+    "pandas-stubs>=2.2.0",
+    "zarr>=3.2.1",
+    "gcsfs>=2026.6.0",
 ]
 notebooks = [
     "numpy>=2.4.0",
@@ -55,7 +57,7 @@ python_version = "3.12"
 strict = true
 
 [[tool.mypy.overrides]]
-module = ["aurora.*", "microsoft_aurora.*"]
+module = ["aurora.*", "microsoft_aurora.*", "gcsfs.*", "gcsfs", "zarr.*", "zarr"]
 ignore_missing_imports = true
 
 [build-system]
