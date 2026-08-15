@@ -75,6 +75,8 @@ def _build_model(model_name: ModelName) -> Aurora:
         return AuroraSmallPretrained()
     if model_name == "aurora-pretrained":
         return AuroraPretrained()
+    if model_name == "aurora-finetuned":
+        return Aurora()
     # Exhaustiveness guard for future ModelName literals.
     msg = f"no constructor registered for {model_name!r}"
     raise KeyError(msg)
