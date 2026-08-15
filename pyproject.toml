@@ -38,6 +38,11 @@ notebooks = [
     "ipykernel>=7.0.0",
     "jupyter>=1.1.0",
 ]
+# WP5 quick-look map only. Not imported by src/; install with: uv sync --extra viz
+viz = [
+    "matplotlib>=3.10.0",
+    "cartopy>=0.24.0",
+]
 
 [tool.uv]
 package = true

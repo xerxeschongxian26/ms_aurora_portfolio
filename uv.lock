@@ -274,9 +274,14 @@ notebooks = [
     { name = "scikit-learn" },
     { name = "zarr" },
 ]
+viz = [
+    { name = "cartopy" },
+    { name = "matplotlib" },
+]
 
 [package.metadata]
 requires-dist = [
+    { name = "cartopy", marker = "extra == 'viz'", specifier = ">=0.24.0" },
     { name = "detect-secrets", marker = "extra == 'notebooks'", specifier = ">=1.5.0" },
     { name = "earthkit", marker = "extra == 'notebooks'", specifier = ">=1.0.0" },
     { name = "fsspec", marker = "extra == 'notebooks'", specifier = ">=2026.6.0" },
@@ -285,6 +290,7 @@ requires-dist = [
     { name = "ipykernel", marker = "extra == 'notebooks'", specifier = ">=7.0.0" },
     { name = "jupyter", marker = "extra == 'notebooks'", specifier = ">=1.1.0" },
     { name = "matplotlib", marker = "extra == 'notebooks'", specifier = ">=3.10.0" },
+    { name = "matplotlib", marker = "extra == 'viz'", specifier = ">=3.10.0" },
     { name = "microsoft-aurora", specifier = "==1.8.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.20.0" },
     { name = "nbstripout", marker = "extra == 'notebooks'", specifier = ">=0.9.0" },
@@ -302,7 +308,7 @@ requires-dist = [
     { name = "zarr", marker = "extra == 'dev'", specifier = ">=3.2.1" },
     { name = "zarr", marker = "extra == 'notebooks'", specifier = ">=3.2.1" },
 ]
-provides-extras = ["dev", "notebooks"]
+provides-extras = ["dev", "notebooks", "viz"]
 
 [[package]]
 name = "aws-requests-auth"
