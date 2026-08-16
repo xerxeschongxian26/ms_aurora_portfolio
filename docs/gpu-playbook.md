@@ -21,27 +21,35 @@ Copy, edit, keep visible until teardown:
 
 ```
 Date / timebox end: _______________  (hard stop — terminate even if DoD incomplete)
-SKU booked: _______________________  (e.g. 1x A10 24GB)
-Image: ____________________________  (must be GPU-ready — see §2)
-ISA expected: x86_64 | aarch64
+SKU booked: _______________________  (prefer A100 40GB+ / H100; not A10-for-rehearsal)
+Image: GPU Base 22.0
+ISA expected: x86_64 | aarch64     (fill from console, confirm with uname -m)
 PLATFORM: linux/amd64 | linux/arm64
 Hourly rate verified at booking: $_____ / hr
-Billing alarm / spend guard: ________ (Lambda may not offer in-console alerts — use a
-  timer + card limit / mental hard stop)
+Billing alarm / spend guard: wall-clock timer + terminate at timebox
 
-This session DoD (Stage 0 rehearsal — tick as you go):
+This session DoD (Stage 1 WP6 — tick as you go):
+  6a
   [ ] SSH as ubuntu; uname -m and nvidia-smi match the SKU
-  [ ] Docker group active (newgrp or fresh login); GPU visible in container
-  [ ] Clone repo; make docker-build PLATFORM=… succeeds (cpu target)
-  [ ] make docker-run PLATFORM=… completes toy forward; shapes logged
-  [ ] Artifacts copied off the box via scp from the laptop
-  [ ] Instance TERMINATED; console shows gone; billing stopped
+  [ ] Docker group active; GPU visible in container
+      docker run --rm --gpus all nvidia/cuda:12.6.3-runtime-ubuntu22.04 nvidia-smi
+  [ ] docker manifest inspect covers booked PLATFORM for 12.6.3-runtime-ubuntu22.04
+  [ ] Clone stage1; PLATFORM=… make docker-build-gpu (or docker build --target gpu) succeeds
+  [ ] Trivial CUDA forward inside the gpu image (torch.cuda.is_available + tiny tensor)
+  6b
+  [ ] HF cache mounted; aurora-0.25-finetuned.ckpt loads
+  [ ] python scripts/real_forecast.py --steps 4  (HRES-T0 2022-06-15T12, naive datetime)
+  [ ] Eyeball: four 2t maps coherent, continents upright, weather evolves (not skill)
+  Teardown
+  [ ] scp PNGs + logs from the laptop (not from the instance)
+  [ ] Instance TERMINATED (not Stop); console gone; billing stopped
 
 Out of scope this session:
-  - Building/running the Dockerfile `gpu` stage (still scaffold / exit 1)
-  - ERA5 / skill metrics / CUDA wheel debugging beyond toolkit smoke
+  - Metrics / RMSE / Stage 2
+  - Regional cropping, optimization, extras-into-core
+  - WP7 README/roadmap
+  - Debugging the data path (that is CPU; abort and terminate if HresT0Source is the failure)
   - Leaving the instance stopped overnight
-  - apt-installing random nvidia-utils-* packages from Ubuntu's "can be installed with"
 ```
 
 ### Billing / spend control
