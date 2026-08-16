@@ -1,4 +1,4 @@
-"""Autoregressive forecast wrapper around Aurora's ``rollout`` helper.
+"""Autoregressive rollout wrapper around Aurora's ``rollout`` helper.
 
 Each step consumes two input timesteps (T=2) and yields one predicted step (T=1)
 at a 6-hour lead. ``validate_batch`` gates the *input* at this boundary; output
@@ -12,10 +12,10 @@ from aurora import Aurora, Batch, rollout
 
 from aurora_inference.contract import AURORA_PRETRAINED_SPEC, ModelSpec, validate_batch
 
-__all__ = ["run_forecast"]
+__all__ = ["run_rollout"]
 
 
-def run_forecast(
+def run_rollout(
     model: Aurora,
     batch: Batch,
     steps: int,
@@ -25,7 +25,7 @@ def run_forecast(
     """Roll the model forward ``steps`` times and return one ``Batch`` per lead time.
 
     Wraps :func:`aurora.rollout.rollout` under ``torch.inference_mode()``. Device
-    placement follows the model (CPU for WP4/WP5, GPU in WP6).
+    placement follows the model.
 
     Args:
         model: An Aurora checkpoint already in eval mode on the target device
@@ -50,11 +50,11 @@ def run_forecast(
     validate_batch(batch, spec)
 
     with torch.inference_mode():
-        forecasts = list(rollout(model, batch, steps))
+        predictions = list(rollout(model, batch, steps))
 
-    for pred in forecasts:
+    for pred in predictions:
         _assert_output_time_dim_is_one(pred)
-    return forecasts
+    return predictions
 
 
 def _assert_output_time_dim_is_one(prediction: Batch) -> None:

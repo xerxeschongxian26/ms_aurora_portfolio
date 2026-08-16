@@ -3,7 +3,7 @@
 Runs a real pinned-checkpoint load and one ``model(batch)`` step. First run may
 download from HuggingFace into ``~/.cache/huggingface/``.
 Excluded from default pytest CI via ``addopts = -m 'not slow'``.
-Run with ``make test-slow``. This tests the synthetic CLI, not ``run_forecast``.
+Run with ``make test-slow``. This tests the synthetic CLI, not ``run_rollout``.
 """
 
 from __future__ import annotations

@@ -24,7 +24,7 @@ from aurora_inference.config import GCS_STORE_LINK
 from aurora_inference.contract import AURORA_PRETRAINED_SPEC, validate_batch
 from aurora_inference.data.hres_t0 import HresT0Source, open_connection_to_gcs
 from aurora_inference.data.static_vars import get_hres_t0_static
-from aurora_inference.inference.forward import run_forecast
+from aurora_inference.inference.forward import run_rollout
 from aurora_inference.model.loader import load_model
 
 _LOG = logging.getLogger(__name__)
@@ -98,14 +98,14 @@ def main(argv: list[str] | None = None) -> int:
     _LOG.info("model load wall time: %.2fs", time.perf_counter() - load_started)
 
     rollout_started = time.perf_counter()
-    forecasts = run_forecast(model, batch, steps=args.steps)
+    predictions = run_rollout(model, batch, steps=args.steps)
     _LOG.info(
-        "run_forecast wall time: %.2fs for %d steps",
+        "run_rollout wall time: %.2fs for %d steps",
         time.perf_counter() - rollout_started,
         args.steps,
     )
 
-    for i, pred in enumerate(forecasts, start=1):
+    for i, pred in enumerate(predictions, start=1):
         output_path = _OUTPUT_DIR / f"real_forward_2t_step{i:02d}.png"
         plot_batch_2t(pred, output_path)
 
