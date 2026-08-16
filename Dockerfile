@@ -1,6 +1,5 @@
 # syntax=docker/dockerfile:1
 # Multi-stage image for aurora-inference.
-# Default build target is `cpu` (Stage 0). GPU is scaffolded for Stage 1.
 #
 # Platforms (set via `docker build --platform` / `make docker-build PLATFORM=...`):
 # - refer to Makefile for more information
@@ -35,7 +34,7 @@ COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY src ./src
 COPY scripts ./scripts
 
-# Install locked runtime deps into /app/.venv; fail if toml and lock drift (--frozen).
+# Install locked runtime deps into /app/.venv; fail if toml and lock drift (--frozen detects the drift).
 RUN uv sync --frozen --no-dev
 
 # Prefer the project venv on PATH so `python` and installed packages resolve there.
@@ -45,7 +44,7 @@ ENV PATH="/app/.venv/bin:${PATH}"
 CMD ["python", "scripts/toy_forward.py"]
 
 # ---------------------------------------------------------------------------
-# gpu — scaffold only; not build by default (`make docker-build` uses cpu stage)
+# gpu; not build by default (`make docker-build` uses cpu stage)
 # Base tag is draft for both arches — confirm the platform you need exists:
 #   docker manifest inspect nvidia/cuda:12.6.3-runtime-ubuntu22.04
 # TODO(stage-1): verify CUDA wheel resolution on the host machine
@@ -53,12 +52,14 @@ CMD ["python", "scripts/toy_forward.py"]
 # Base image is an Ubuntu 22.04 with CUDA:12.6.3 runtime libraries. No Python by default
 FROM nvidia/cuda:12.6.3-runtime-ubuntu22.04 AS gpu
 
-# TODO(stage-1): install Python 3.12 + uv, then resolve torch from the PyTorch
-# CUDA index (cu124/cu126) for the image platform (linux/arm64 or linux/amd64) —
+# TODO(stage-1): CUDA index (cu124/cu126) for the image platform (linux/arm64 or linux/amd64) —
 # blocked on first GPU session on the booked host.
 WORKDIR /app
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.7 /uv /uvx /usr/local/bin/
+
+# installs python 3.12 into the image using uv. This version should match that specified in .toml
+RUN uv python install 3.12
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
@@ -68,9 +69,10 @@ COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY src ./src
 COPY scripts ./scripts
 
-# Placeholder: Stage 1 replaces this with CUDA-index torch install + uv sync.
-# - this placeholder never runs the CMD instructions below due to exit 1
-RUN echo "GPU stage is scaffold only; build with --target cpu for Stage 0" >&2 \
-    && exit 1
+# Install locked runtime deps into /app/.venv; fail if toml and lock drift (--frozen detects the drift).
+RUN uv sync --frozen --no-dev --extra forecast
 
-CMD ["python", "scripts/toy_forward.py"]
+# Prefer the project venv on PATH so `python` and installed packages resolve there.
+ENV PATH="/app/.venv/bin:${PATH}"
+
+CMD ["python", "scripts/real_forecast.py"]

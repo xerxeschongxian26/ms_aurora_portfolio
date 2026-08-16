@@ -40,6 +40,7 @@ notebooks = [
 ]
 
 # This extra dependency is for real_forecast.py / GPU image
+# - also includes the packages from viz via self referencing "aurora-inference[viz]"
 forecast = [
     "zarr>=3.2.1",
     "gcsfs>=2026.6.0",
