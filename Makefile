@@ -81,7 +81,7 @@ docker-build-gpu:
 	     		 --platform $(PLATFORM) \
 				 -t $(IMAGE_TAG_GPU) .
 
-# Run the CPU image default CMD (scripts/toy_forward.py) with the host HuggingFace
+# Run the CPU image default CMD (scripts/synthetic_forward.py) with the host HuggingFace
 # cache mounted; deletes the container upon completion
 docker-run:
 	docker run -e HF_HOME=/cache/huggingface \

@@ -221,7 +221,7 @@ What this does:
 
 - Builds the Dockerfile **`cpu`** stage for that platform (tags
   `aurora-inference:cpu-linux-amd64` / `cpu-linux-arm64`).
-- Runs `scripts/toy_forward.py` with `HF_HOME=/cache/huggingface` and
+- Runs `scripts/synthetic_forward.py` with `HF_HOME=/cache/huggingface` and
   `$HOME/.cache/huggingface` bind-mounted.
 - May download the pinned HF checkpoint on first run — expected.
 
@@ -233,7 +233,7 @@ very slow downloads. Never bake tokens into the image.
 
 ### What `docker-run` produces
 
-The toy forward **does not write project result files** — it logs shapes / timings /
+The synthetic forward **does not write project result files** — it logs shapes / timings /
 peak RSS / the no-skill banner to **stdout**, then the container is removed (`--rm`).
 
 What *does* persist on the instance:
@@ -245,7 +245,7 @@ Capture session proof yourself:
 
 ```bash
 mkdir -p ~/session-artifacts
-make docker-run PLATFORM="$PLATFORM" 2>&1 | tee ~/session-artifacts/toy_forward.log
+make docker-run PLATFORM="$PLATFORM" 2>&1 | tee ~/session-artifacts/synthetic_forward.log
 uname -m > ~/session-artifacts/uname.txt
 nvidia-smi > ~/session-artifacts/nvidia-smi.txt
 date -u > ~/session-artifacts/finished_utc.txt
@@ -254,7 +254,7 @@ date -u > ~/session-artifacts/finished_utc.txt
 | Command | Purpose |
 |---|---|
 | `mkdir -p ~/session-artifacts` | Folder to `scp` home |
-| `… \| tee …/toy_forward.log` | Run again; show output and save log (`2>&1` includes warnings) |
+| `… \| tee …/synthetic_forward.log` | Run again; show output and save log (`2>&1` includes warnings) |
 | `uname -m > …` | Record instance ISA |
 | `nvidia-smi > …` | Record GPU / driver snapshot |
 

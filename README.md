@@ -108,10 +108,10 @@ peak RSS: 1696.29 MiB (1778688000 bytes)
 
 ```mermaid
 flowchart LR
-  A[toy_forward] --> B[SyntheticSource.load] --> C[Batch]
+  A[synthetic_forward] --> B[SyntheticSource.load] --> C[Batch]
 ```
 
-- **toy_forward** — Runs a toy forward pass on the CPU using AuroraSmallPretrained based on synthetic data
+- **synthetic_forward** — Runs a CPU forward pass using AuroraSmallPretrained on synthetic data (no forecast skill)
 - **SyntheticSource** — A dataclass with the method `.load()` that generates a contractually correct `Batch` type input
 - **Batch** — A dataclass shipped with the aurora library that stores the input features and which the model expects as an input
 

@@ -30,7 +30,7 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 # Dependency manifest + lockfile (paths are relative to build context = repo root).
 COPY pyproject.toml uv.lock README.md LICENSE ./
-# Application package and the toy inference entry script.
+# Application package and the synthetic-forward entry script.
 COPY src ./src
 COPY scripts ./scripts
 
@@ -41,7 +41,7 @@ RUN uv sync --frozen --no-dev
 ENV PATH="/app/.venv/bin:${PATH}"
 
 # Default container command when `make docker-run` (or `docker run`) is used.
-CMD ["python", "scripts/toy_forward.py"]
+CMD ["python", "scripts/synthetic_forward.py"]
 
 # ---------------------------------------------------------------------------
 # gpu; not build by default (`make docker-build` uses cpu stage)
