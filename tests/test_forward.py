@@ -21,6 +21,7 @@ from aurora_inference.model.loader import load_model
 _GRID_HEIGHT = 32
 _GRID_WIDTH = 64
 _FORECAST_STEPS = 4
+_DEVICE = "cpu"
 _INIT_TIME = datetime(2022, 1, 1, 12, 0)
 _LEVEL_COUNT = len(AURORA_PRETRAINED_SPEC.atmos_levels)
 
@@ -40,7 +41,7 @@ def test_run_forecast_small_model_cpu_returns_one_batch_per_step() -> None:
     """WP4 acceptance: 4-step CPU rollout, each output has T=1 and the input grid."""
     source = SyntheticSource(height=_GRID_HEIGHT, width=_GRID_WIDTH)
     batch = source.load(_INIT_TIME, AURORA_PRETRAINED_SPEC)
-    model = load_model(device="cpu")
+    model = load_model(device=_DEVICE)
 
     forecasts = run_forecast(model, batch, steps=_FORECAST_STEPS)
 
