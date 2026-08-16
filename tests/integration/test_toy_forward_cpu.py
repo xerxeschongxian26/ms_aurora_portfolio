@@ -3,7 +3,7 @@
 Runs a real pinned-checkpoint load and one forward pass. First run may download
 from HuggingFace into ``~/.cache/huggingface/``.
 Excluded from default pytest CI via ``addopts = -m 'not slow'``
-Run with ``make test-slow``.
+Run with ``make test-slow``. Refer to Makefile for more information
 """
 
 from __future__ import annotations
