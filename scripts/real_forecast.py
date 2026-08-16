@@ -3,10 +3,8 @@
 Aurora() possesses forecast skill. Recall that Aurora(), is AuroraPretrained that
 has been fine-tuned on the HRES-T0 dataset.
 
-Requires the ``viz`` extra (and ``dev`` for zarr/gcsfs)::
-
-    uv sync --extra dev --extra viz
-    python scripts/real_forecast.py --steps 4
+uv sync --extra forecast
+python scripts/real_forecast.py --steps 4
 """
 
 from __future__ import annotations

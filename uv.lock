@@ -259,6 +259,13 @@ dev = [
     { name = "ruff" },
     { name = "zarr" },
 ]
+forecast = [
+    { name = "cartopy" },
+    { name = "gcsfs" },
+    { name = "matplotlib" },
+    { name = "pandas" },
+    { name = "zarr" },
+]
 notebooks = [
     { name = "detect-secrets" },
     { name = "earthkit" },
@@ -281,11 +288,13 @@ viz = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aurora-inference", extras = ["viz"], marker = "extra == 'forecast'" },
     { name = "cartopy", marker = "extra == 'viz'", specifier = ">=0.24.0" },
     { name = "detect-secrets", marker = "extra == 'notebooks'", specifier = ">=1.5.0" },
     { name = "earthkit", marker = "extra == 'notebooks'", specifier = ">=1.0.0" },
     { name = "fsspec", marker = "extra == 'notebooks'", specifier = ">=2026.6.0" },
     { name = "gcsfs", marker = "extra == 'dev'", specifier = ">=2026.6.0" },
+    { name = "gcsfs", marker = "extra == 'forecast'", specifier = ">=2026.6.0" },
     { name = "gcsfs", marker = "extra == 'notebooks'", specifier = ">=2026.6.0" },
     { name = "ipykernel", marker = "extra == 'notebooks'", specifier = ">=7.0.0" },
     { name = "jupyter", marker = "extra == 'notebooks'", specifier = ">=1.1.0" },
@@ -295,6 +304,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.20.0" },
     { name = "nbstripout", marker = "extra == 'notebooks'", specifier = ">=0.9.0" },
     { name = "numpy", marker = "extra == 'notebooks'", specifier = ">=2.4.0" },
+    { name = "pandas", marker = "extra == 'forecast'" },
     { name = "pandas-stubs", marker = "extra == 'dev'", specifier = ">=2.2.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.6.0" },
     { name = "pre-commit", marker = "extra == 'notebooks'", specifier = ">=4.6.0" },
@@ -306,9 +316,10 @@ requires-dist = [
     { name = "scikit-learn", marker = "extra == 'notebooks'", specifier = ">=1.8.0" },
     { name = "torch", specifier = ">=2.11.0" },
     { name = "zarr", marker = "extra == 'dev'", specifier = ">=3.2.1" },
+    { name = "zarr", marker = "extra == 'forecast'", specifier = ">=3.2.1" },
     { name = "zarr", marker = "extra == 'notebooks'", specifier = ">=3.2.1" },
 ]
-provides-extras = ["dev", "notebooks", "viz"]
+provides-extras = ["dev", "notebooks", "forecast", "viz"]
 
 [[package]]
 name = "aws-requests-auth"
