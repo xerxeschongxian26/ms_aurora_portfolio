@@ -47,12 +47,12 @@ CMD ["python", "scripts/synthetic_forward.py"]
 # gpu; not build by default (`make docker-build` uses cpu stage)
 # Base tag is draft for both arches — confirm the platform you need exists:
 #   docker manifest inspect nvidia/cuda:12.6.3-runtime-ubuntu22.04
-# TODO(stage-1): verify CUDA wheel resolution on the host machine
+# TODO(stage-2): verify CUDA wheel resolution on the host machine
 # ---------------------------------------------------------------------------
 # Base image is an Ubuntu 22.04 with CUDA:12.6.3 runtime libraries. No Python by default
 FROM nvidia/cuda:12.6.3-runtime-ubuntu22.04 AS gpu
 
-# TODO(stage-1): CUDA index (cu124/cu126) for the image platform (linux/arm64 or linux/amd64) —
+# TODO(stage-2): CUDA index (cu124/cu126) for the image platform (linux/arm64 or linux/amd64) —
 # blocked on first GPU session on the booked host.
 WORKDIR /app
 
