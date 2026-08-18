@@ -19,7 +19,9 @@ dev = [
     "ruff>=0.15.0",
     "mypy>=1.20.0",
     "pre-commit>=4.6.0",
-
+    "pandas-stubs>=2.2.0",
+    "zarr>=3.2.1",
+    "gcsfs>=2026.6.0",
 ]
 notebooks = [
     "numpy>=2.4.0",
@@ -35,6 +37,21 @@ notebooks = [
     "detect-secrets>=1.5.0",
     "ipykernel>=7.0.0",
     "jupyter>=1.1.0",
+]
+
+# This extra dependency is for real_forecast.py / GPU image
+# - also includes the packages from viz via self referencing "aurora-inference[viz]"
+forecast = [
+    "zarr>=3.2.1",
+    "gcsfs>=2026.6.0",
+    "aurora-inference[viz]",
+    "pandas",
+]
+
+# WP5 quick-look map only. Not imported by src/; install with: uv sync --extra viz
+viz = [
+    "matplotlib>=3.10.0",
+    "cartopy>=0.24.0",
 ]
 
 [tool.uv]
@@ -55,7 +72,7 @@ python_version = "3.12"
 strict = true
 
 [[tool.mypy.overrides]]
-module = ["aurora.*", "microsoft_aurora.*"]
+module = ["aurora.*", "microsoft_aurora.*", "gcsfs.*", "gcsfs", "zarr.*", "zarr"]
 ignore_missing_imports = true
 
 [build-system]

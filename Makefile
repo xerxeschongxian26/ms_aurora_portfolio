@@ -1,5 +1,5 @@
 # Declares targets that are not real files, so `make` always runs their recipes/commands defined here.
-.PHONY: install lint format typecheck test test-slow check docker-build docker-run
+.PHONY: install lint format typecheck test test-slow check docker-build docker-build-cpu docker-build-gpu docker-run docker-run-gpu
 
 # Install the project + dev tools into .venv from the lockfile (reproducible local env).
 #   uv sync          — create/update the virtualenv and install dependencies
@@ -57,22 +57,45 @@ check: lint typecheck test
 # Platform string in the tag; `/` character replaced with `-` because Docker tags cannot contain `/`
 # - "linux/arm64" has the tag "cpu-linux-arm64" | "linux/amd64" has the tag "cpu-linux-amd64"
 PLATFORM ?= linux/arm64
-IMAGE_TAG := aurora-inference:cpu-$(subst /,-,$(PLATFORM))
+IMAGE_TAG_CPU := aurora-inference:cpu-$(subst /,-,$(PLATFORM))
+IMAGE_TAG_GPU := aurora-inference:gpu-$(subst /,-,$(PLATFORM))
 
-# Build the CPU only image for $(PLATFORM) and names the image with $(IMAGE_TAG) but does not run it.
-#   For x86 cloud hosts: "make docker-build PLATFORM=linux/amd64"
-#   IMAGE_TAG: aurora-inference:cpu-<platform> (e.g. cpu-linux-arm64)
-#   "--target cpu" stops build at the named "cpu" stage and skips the gpu scaffold
-docker-build:
+# Build the CPU only image for $(PLATFORM) and names the image with $(IMAGE_TAG_CPU) but does not run it.
+#   For x86 cloud hosts: "make docker-build-cpu PLATFORM=linux/amd64"
+#   IMAGE_TAG_CPU: aurora-inference:cpu-<platform> (e.g. cpu-linux-arm64)
+#   "--target cpu" stops build at the named "cpu" stage and skips the gpu stage
+#   docker-build is an alias so README / playbook `make docker-build` still works
+docker-build-cpu:
 	docker build --target cpu  \
 	     		 --platform $(PLATFORM) \
-				 -t $(IMAGE_TAG) .
+				 -t $(IMAGE_TAG_CPU) .
 
-# Run the image specified by $(IMAGE_TAG) default CMD (scripts/toy_forward.py) with the host
-# HuggingFace cache mounted to the container and deletes the container upon completion
+docker-build: docker-build-cpu
+
+# Build the GPU only image for $(PLATFORM) and names the image with $(IMAGE_TAG_GPU) but does not run it.
+#   For x86 cloud hosts: "make docker-build-gpu PLATFORM=linux/amd64"
+#   IMAGE_TAG_GPU: aurora-inference:gpu-<platform> (e.g. gpu-linux-arm64)
+#   "--target gpu" stops at the gpu stage (independent FROM; does not build cpu)
+docker-build-gpu:
+	docker build --target gpu  \
+	     		 --platform $(PLATFORM) \
+				 -t $(IMAGE_TAG_GPU) .
+
+# Run the CPU image default CMD (scripts/synthetic_forward.py) with the host HuggingFace
+# cache mounted; deletes the container upon completion
 docker-run:
 	docker run -e HF_HOME=/cache/huggingface \
 			   -v "$(HOME)/.cache/huggingface:/cache/huggingface" \
 			   --rm \
 			   --platform $(PLATFORM) \
-			   $(IMAGE_TAG)
+			   $(IMAGE_TAG_CPU)
+
+# Run the GPU image default CMD (scripts/real_forecast.py) with host GPUs and the
+# host HuggingFace cache mounted; deletes the container upon completion
+docker-run-gpu:
+	docker run --gpus all \
+			   -e HF_HOME=/cache/huggingface \
+			   -v "$(HOME)/.cache/huggingface:/cache/huggingface" \
+			   --rm \
+			   --platform $(PLATFORM) \
+			   $(IMAGE_TAG_GPU)

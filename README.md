@@ -1,106 +1,109 @@
-# aurora-inference
+# Project Name: aurora-inference
 
-This repository contains a self-hosted inference service for the open-sourced Aurora model by Microsoft Research. The model was first released in June 2024, followed by its associated Nature article in October 2025. The links to official GitHub and Hugging Face repositories are found below.
+<p align="center">
+  <img src="docs/images/hres_t0_forecast_2t.png" alt="Global 2 m temperature from an Aurora 0.25° fine-tuned forecast on HRES-T0" width="800"/>
+</p>
 
-[Aurora: A Foundation Model for the Earth System](https://github.com/microsoft/aurora)
-[Hugging Face Repository for Aurora](https://huggingface.co/microsoft/aurora)
+*2 m temperature from Aurora fine-tuned on HRES-T0. Init 2022-06-15T12.  
+Forecast maps and numbers in this repo are from this project’s pipeline, not Microsoft or the Aurora authors, unless a figure is cited from the paper.*  
+
+This repository contains a self-hosted inference service for the open-sourced Aurora model by Microsoft Research. The model was first released in June 2024, followed by its associated Nature article in October 2025. The links to official GitHub, Hugging Face repositories, and follow-up paper, are found below.
+
+[Aurora: A Foundation Model for the Earth System](https://github.com/microsoft/aurora)  
+[Hugging Face Repository for Aurora](https://huggingface.co/microsoft/aurora)  
+[Aurora 1.5, follow-up paper](https://www.microsoft.com/en-us/research/publication/aurora-1-5-fine-tuning-a-foundation-model-for-medium-range-ensemble-weather-prediction/)
 
 ## Why this project
 
-The project scope is a self-hosted engineering project based on an open-sourced foundation model, focusing on build towards a serving and inference optimisation layer. This is a deliberate bounded *initial* scope that emphasises core engineering skills whilst keeping costs low.
+The project scope is a self-hosted engineering project based on an open-sourced foundation model, focusing on building towards a serving and inference optimisation layer. This is a deliberate bounded scope that emphasises core ML engineering skills whilst keeping costs low.
 
-With growing concerns over data privacy, data governance and the overall sovereignty of AI systems, the benefits and ability to self-host one's AI model cannot be overstated. To that end, this project has two goals:
+With growing concerns over data privacy, data governance and the overall sovereignty of AI systems, the benefits and ability to self-host one's AI model cannot be overstated. To that end, this project has three goals:
 
 1. Self-hosting an open-sourced foundation model
-    The checkpoints/weights of the trained Aurora foundation model are available on Hugging Face. The goal is to develop an end-to-end deep learning pipeline towards serving inference over an API.
+    The checkpoints/weights of the trained foundation model are available on Hugging Face. The goal is to develop an end-to-end deep learning pipeline towards serving inference over an API.
 2. Optimise for inference and understand trade-offs in performance
     Based on recent issues described on the official repository, there remains possible outstanding optimisations that can be performed on the model. The papers emphasise model architecture details and model fine-tuning whilst the official kit offer optimised options.
-    Whilst such optimisation techniques are common across deep learning models, to the best of my knowledge, that there are no documented results on the trade-offs in Aurora's performance associated with these techniques.
-    *i.e., how far can inference engineering be pushed before forecast quality suffers*. While learning to apply these techniques, I am to document these trade-offs in this repository.
+    Whilst such optimisation techniques are common across deep learning models, to the best of my knowledge, there are no documented results on the trade-offs in Aurora's performance associated with these techniques.
+    *i.e., how far can inference engineering be pushed before forecast quality suffers*. While learning to apply these techniques, I aim to document these trade-offs in this repository.
+3. Whilst fine-tuning models is an important step in the development and deployment of deep learning models, I have deliberately chosen to exclude fine-tuning from this project to keep costs low and feedback loops short.
 
+## Current stage: Stage 1
 
-At time of writing, the value of fine-tuning foundation models is acknowledged but such plans are reserved for the future.
+Stage 1 involves building a reproducible pipeline that ingests HRES_T0 analysis data into a weather foundation model to produce real out-of-sample global forecasts.
 
-## Current stage: Stage 0
-
-Stage 0 involves building the scaffolding for the project.
-
-Objectives include, but are not limited to the following:
-1. Set up the repository with pre-commit hooks and Continuous Integration (CI) best practices
-2. Locking dependencies using uv to enforce reproducibility
-3. Define the contract for the model inputs and its associated tests
-4. Create synthetic batches to run toy inferences on CPUs only
-5. Create Docker files to build images and support runs on local and remote instances
-6. Create Docker file that supports dual-architectures (linux/arm64 and linux/amd64)
-7. Trial running the sequence of setup and tear down on a remote instance
+Objectives included, but are not limited to the following:
+1. Identify a reported performance metric from the papers
+2. Create a data seam for the HRES_T0 data source from the WeatherBench2 benchmark Google Cloud Storage, called HresTOSource
+3. Create a data seam for the associated static variables (lat-lon coordinates .etc) stored in the HuggingFace repository
+4. Create a script to perform a toy single forecast (single-step inference) on a CPU
+  - Uses a trimmed feature set
+5. Create a script to perform a toy rollout forecast (autoregressive inference) on a CPU
+  - Uses a trimmed feature set
+6. Create a script to perform a real rollout forecast (autoregressive inference) on a GPU
+  - Uses a full feature set
+7. Create the GPU stage for the Dockerfile to run a real rollout forecast
+8. Complete a full setup-inference-teardown cycle 
+9. Write associate integration and unit tests for the above
 
 ## Quickstart
 
 ### Prerequisites
 
-Ensure that Python version 3.12 and uv are installed.
+Python 3.12 and [uv](https://docs.astral.sh/uv/) are required for the quality gate. The Stage 1 forecast map is produced on a GPU: Docker with NVIDIA Container Toolkit (`--gpus all`), or a host with CUDA and `uv sync --extra forecast`.
 
-The instructions here are for running a toy inference on a CPU.
+Make targets are defined in the `Makefile`. The default `PLATFORM` is `linux/arm64` (Apple Silicon / GH200). On x86_64 cloud GPUs (A10 / A100 / H100) pass `PLATFORM=linux/amd64` or the image will fail with `exec format error`.
 
-All make commands are based on configurations specified in the `Makefile` in the project root.
-
-Begin by cloning the repository and changing the working directory to the cloned project root.
+### Clone and quality gate
 
 ```sh
 git clone https://github.com/xerxeschongxian26/ms_aurora_portfolio.git
 cd ms_aurora_portfolio
-```
-
-Run `make install` to install the required dependencies as specified in the `uv.lock` file.
-
-```sh
 make install
-```
-
-Next, run `make check` to run linters, typecheckers, the fast default pytest suite, and the ruff format check.
-
-```sh
 make check
-```
-
-Next, run `make test-slow` to run tests that are marked as slow. At the completion of Stage 0, these tests are still simple and usually quick once weights are cached; the first run may take much longer while Hugging Face downloads.
-
-```sh
 make test-slow
 ```
 
-When the `make` commands above complete without error, the repository is deemed to be in a functional state.
+`make install` syncs the lockfile with the `dev` extra. `make check` runs Ruff, mypy, the fast pytest suite (fixtures only, no network), and a format check. `make test-slow` loads the pinned small checkpoint from Hugging Face (first run downloads into `~/.cache/huggingface`).
 
-To run the remaining commands in this section, ensure that Docker has been installed.
+### GPU forecast (HRES-T0 → Aurora 0.25° FT)
 
-Run the commands below to build the Docker image from the `Dockerfile`. The commands assume a default `linux/arm64` architecture; a mismatch will return an `exec format error`.
+This is the Stage 1 entrypoint: `scripts/real_forecast.py` loads WB2 HRES-T0, runs `run_rollout` on `aurora-finetuned`, and writes one global `2t` PNG per step. Init time is `2022-06-15T12`. The script exits if CUDA is unavailable.
 
-The image does not bake in model checkpoints. Weights are cached on the host machine under `~/.cache/huggingface` and mounted into the container at run time (see the `docker-run` target in the `Makefile`).
-
-The image building step takes approximately 10 minutes wall-time when running for the first time. Subsequent runs will take substantially less time as they are based on the cache of the Docker image.
+The GPU image does not bake in checkpoints. Hugging Face weights are cached on the host and mounted at run time. The run needs network for the public HRES-T0 zarr on GCS and, on a cache miss, the fine-tuned checkpoint.
 
 ```sh
-make docker-build
-make docker-run
+make docker-build-gpu PLATFORM=linux/amd64
+mkdir -p outputs
+docker run --gpus all \
+  -e HF_HOME=/cache/huggingface \
+  -v "$HOME/.cache/huggingface:/cache/huggingface" \
+  -v "$(pwd)/outputs:/app/outputs" \
+  --rm \
+  --platform linux/amd64 \
+  aurora-inference:gpu-linux-amd64
 ```
 
-If your host machine is based on an AMD/Intel architecture, use the following commands instead.
+`make docker-run-gpu PLATFORM=linux/amd64` is the same run **without** an outputs mount. The Makefile uses `--rm`, so maps written under `/app/outputs` are deleted with the container unless you bind-mount `outputs/` as above.
+
+On success the logs include a forecast-skill banner and rollout wall time. PNGs land in `outputs/real_forecast_2t_stepNN.png` (gitignored). The banner image in this README is one of those maps.
+
+Without Docker, on a CUDA host:
+
+```sh
+uv sync --extra forecast --frozen
+python scripts/real_forecast.py --steps 4
+```
+
+### CPU plumbing (optional)
+
+The CPU image runs `scripts/synthetic_forward.py`: `AuroraSmallPretrained` on a synthetic 32×64 batch. Output has no forecast skill.
 
 ```sh
 make docker-build PLATFORM=linux/amd64
 make docker-run PLATFORM=linux/amd64
 ```
 
-The following should be printed to the terminal as the result of an inference using a synthetic input `Batch`.
-```
-=== NO FORECAST SKILL === AuroraSmallPretrained + SyntheticSource is a plumbing proof only. Output is meaningless; do not report skill numbers.
-input shapes: surf 2t=(1, 2, 32, 64) atmos t=(1, 2, 13, 32, 64) grid=32x64 device=cpu
-model load wall time: 4.01s (includes HF cache hit or download)
-forward wall time: 0.75s
-output shapes: surf 2t=(1, 1, 32, 64) atmos t=(1, 1, 13, 32, 64) (T==1 as expected)
-peak RSS: 1696.29 MiB (1778688000 bytes)
-=== NO FORECAST SKILL ===
-```
+Omit `PLATFORM=...` on `linux/arm64` hosts. Expect a `NO FORECAST SKILL` banner and shape / timing lines on stdout; this path does not write PNGs.
 
 ## Architecture
 
@@ -108,10 +111,10 @@ peak RSS: 1696.29 MiB (1778688000 bytes)
 
 ```mermaid
 flowchart LR
-  A[toy_forward] --> B[SyntheticSource.load] --> C[Batch]
+  A[synthetic_forward] --> B[SyntheticSource.load] --> C[Batch]
 ```
 
-- **toy_forward** — Runs a toy forward pass on the CPU using AuroraSmallPretrained based on synthetic data
+- **synthetic_forward** — Runs a CPU forward pass using AuroraSmallPretrained on synthetic data (no forecast skill)
 - **SyntheticSource** — A dataclass with the method `.load()` that generates a contractually correct `Batch` type input
 - **Batch** — A dataclass shipped with the aurora library that stores the input features and which the model expects as an input
 
@@ -141,27 +144,52 @@ flowchart LR
 
 ## Roadmap
 
-### Stage 0 — Foundations (Done)
+### Stage 0 — Scaffolding and Foundations
+
+Stage 0 involves building the scaffolding for the project.
 
 Repo tooling and CI; locked deps with uv; Batch input contract + tests; synthetic batches for CPU toy inference; CPU Docker for local/remote; remote setup/teardown rehearsal via the GPU playbook. No connection to ERA5, no served API, no skill metrics.
 
-### Stage 1 — Real ERA5 forecast pipeline - WIP
+Objectives included, but are not limited to the following:
+1. Set up the repository with pre-commit hooks and Continuous Integration (CI) best practices
+2. Locking dependencies using uv, a modern package manager, to enforce reproducibility
+3. Define the contract for the model inputs and its associated tests
+4. Create synthetic batches to run toy inferences on CPUs only
+5. Create Docker files to build images and support runs on local and remote instances
+6. Create Docker file that supports dual-architectures (linux/arm64 and linux/amd64)
+7. Trial running the sequence of setup and tear down on a remote instance
 
-Build a reproducible pipeline ingesting ERA5 reanalysis into a weather foundation model to produce real global forecasts.
+### Stage 1 — Real forecast pipeline - WIP
 
-### Stage 2 — Measured baseline- WIP
+Stage 1 involves building a reproducible pipeline that ingests HRES_T0 analysis data into a weather foundation model to produce real out-of-sample global forecasts.
 
-Build an evaluation harness measuring forecast skill
+Objectives included, but are not limited to the following:
+1. Identify a reported performance metric from the papers
+2. Create a data seam for the HRES_T0 data source from the WeatherBench2 benchmark Google Cloud Storage, called HresTOSource
+3. Create a data seam for the associated static variables (lat-lon coordinates .etc) stored in the HuggingFace repository
+4. Create a script to perform a toy single forecast (single-step inference) on a CPU
+  - Uses a synthetic feature set
+5. Create a script to perform a toy rollout forecast (autoregressive inference) on a CPU
+  - Uses a trimmed feature set
+6. Create a script to perform a real rollout forecast (autoregressive inference) on a GPU
+  - Uses a full feature set
+7. Create the GPU stage for the Dockerfile to run a real rollout forecast
+8. Complete a full setup-inference-teardown cycle 
+9. Write associate integration and unit tests for the above
 
-### Stage 3 — Served & observable - WIP
+### Stage 2 — Measured baseline - Upcoming
+
+Build an evaluation harness measuring, establishing and confirming a baseline skill for the model
+
+### Stage 3 — Served & observable - Upcoming
 
 Deploy the model as a monitored FastAPI inference service with latency/throughput/memory instrumentation
 
-### Stage 4 — Optimized with a measured frontier - WIP
+### Stage 4 — Optimized with a measured frontier - Upcoming
 
 Optimise foundation-model inference
 
-### Stage 5 — Depth, breadth & writeup - WIP
+### Stage 5 — Depth, breadth & writeup - Upcoming
 
 Write-up
 
@@ -189,7 +217,7 @@ Property
 - Both the input and output are of the custom dataclass type Batch
 
 ### Ideas
-- Demonstrate the ability to predict the cyclone path (and state?) for the recent Hurrican Melissa (Oct. 2025)
+- Demonstrate the ability to predict the cyclone path (and state?) for the recent Hurricane Melissa (Oct. 2025)
 
 ## License
 

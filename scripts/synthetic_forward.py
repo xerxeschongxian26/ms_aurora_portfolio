@@ -1,4 +1,4 @@
-"""CPU toy forward pass
+"""CPU synthetic forward pass
 - A single successful forward pass is proof that the data pipeline works
 
 Loads AuroraSmallPretrained with a small synthetic batch, runs one forward step,
@@ -39,8 +39,8 @@ _NO_SKILL_BANNER_BOTTOM = "=== NO FORECAST SKILL === "
 
 
 @dataclass(frozen=True)
-class ToyForwardResult:
-    """Shapes and timings from a single CPU toy forward."""
+class SyntheticForwardResult:
+    """Shapes and timings from a single CPU synthetic forward."""
 
     input_surf_shape: tuple[int, ...]
     input_atmos_shape: tuple[int, ...]
@@ -83,8 +83,8 @@ def _assert_output_time_dim_is_one(prediction: Batch) -> None:
             raise AssertionError(msg)
 
 
-def run_toy_forward() -> ToyForwardResult:
-    """Run the WP5 CPU plumbing proof and return logged metrics."""
+def run_synthetic_forward() -> SyntheticForwardResult:
+    """Run a CPU plumbing proof on synthetic data and return logged metrics."""
     _LOG.warning(_NO_SKILL_BANNER_TOP)
 
     # Create a synthetic Batch object
@@ -130,7 +130,7 @@ def run_toy_forward() -> ToyForwardResult:
     _LOG.info("peak RSS: %.2f MiB (%d bytes)", peak_rss_bytes / (1024 * 1024), peak_rss_bytes)
     _LOG.warning(_NO_SKILL_BANNER_BOTTOM)
 
-    return ToyForwardResult(
+    return SyntheticForwardResult(
         input_surf_shape=input_surf_shape,
         input_atmos_shape=input_atmos_shape,
         output_surf_shape=output_surf_shape,
@@ -147,7 +147,7 @@ def main() -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         stream=sys.stdout,
     )
-    run_toy_forward()
+    run_synthetic_forward()
     return 0
 
 

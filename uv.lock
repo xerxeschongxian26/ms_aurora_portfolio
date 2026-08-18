@@ -250,11 +250,21 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "gcsfs" },
     { name = "mypy" },
+    { name = "pandas-stubs" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
+    { name = "zarr" },
+]
+forecast = [
+    { name = "cartopy" },
+    { name = "gcsfs" },
+    { name = "matplotlib" },
+    { name = "pandas" },
+    { name = "zarr" },
 ]
 notebooks = [
     { name = "detect-secrets" },
@@ -271,20 +281,31 @@ notebooks = [
     { name = "scikit-learn" },
     { name = "zarr" },
 ]
+viz = [
+    { name = "cartopy" },
+    { name = "matplotlib" },
+]
 
 [package.metadata]
 requires-dist = [
+    { name = "aurora-inference", extras = ["viz"], marker = "extra == 'forecast'" },
+    { name = "cartopy", marker = "extra == 'viz'", specifier = ">=0.24.0" },
     { name = "detect-secrets", marker = "extra == 'notebooks'", specifier = ">=1.5.0" },
     { name = "earthkit", marker = "extra == 'notebooks'", specifier = ">=1.0.0" },
     { name = "fsspec", marker = "extra == 'notebooks'", specifier = ">=2026.6.0" },
+    { name = "gcsfs", marker = "extra == 'dev'", specifier = ">=2026.6.0" },
+    { name = "gcsfs", marker = "extra == 'forecast'", specifier = ">=2026.6.0" },
     { name = "gcsfs", marker = "extra == 'notebooks'", specifier = ">=2026.6.0" },
     { name = "ipykernel", marker = "extra == 'notebooks'", specifier = ">=7.0.0" },
     { name = "jupyter", marker = "extra == 'notebooks'", specifier = ">=1.1.0" },
     { name = "matplotlib", marker = "extra == 'notebooks'", specifier = ">=3.10.0" },
+    { name = "matplotlib", marker = "extra == 'viz'", specifier = ">=3.10.0" },
     { name = "microsoft-aurora", specifier = "==1.8.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.20.0" },
     { name = "nbstripout", marker = "extra == 'notebooks'", specifier = ">=0.9.0" },
     { name = "numpy", marker = "extra == 'notebooks'", specifier = ">=2.4.0" },
+    { name = "pandas", marker = "extra == 'forecast'" },
+    { name = "pandas-stubs", marker = "extra == 'dev'", specifier = ">=2.2.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.6.0" },
     { name = "pre-commit", marker = "extra == 'notebooks'", specifier = ">=4.6.0" },
     { name = "pydantic" },
@@ -294,9 +315,11 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.0" },
     { name = "scikit-learn", marker = "extra == 'notebooks'", specifier = ">=1.8.0" },
     { name = "torch", specifier = ">=2.11.0" },
+    { name = "zarr", marker = "extra == 'dev'", specifier = ">=3.2.1" },
+    { name = "zarr", marker = "extra == 'forecast'", specifier = ">=3.2.1" },
     { name = "zarr", marker = "extra == 'notebooks'", specifier = ">=3.2.1" },
 ]
-provides-extras = ["dev", "notebooks"]
+provides-extras = ["dev", "notebooks", "forecast", "viz"]
 
 [[package]]
 name = "aws-requests-auth"
@@ -2779,6 +2802,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/a6/de/8b1895b107277d52f2b42d3a6806e69cfef0d5cf1d0ba343470b9d8e0a04/pandas-2.3.3-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:a68e15f780eddf2b07d242e17a04aa187a7ee12b40b930bfdd78070556550e98", size = 12771002, upload-time = "2025-09-29T23:20:26.76Z" },
     { url = "https://files.pythonhosted.org/packages/87/21/84072af3187a677c5893b170ba2c8fbe450a6ff911234916da889b698220/pandas-2.3.3-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:371a4ab48e950033bcf52b6527eccb564f52dc826c02afd9a1bc0ab731bba084", size = 13450971, upload-time = "2025-09-29T23:20:41.344Z" },
     { url = "https://files.pythonhosted.org/packages/86/41/585a168330ff063014880a80d744219dbf1dd7a1c706e75ab3425a987384/pandas-2.3.3-cp312-cp312-win_amd64.whl", hash = "sha256:a16dcec078a01eeef8ee61bf64074b4e524a2a3f4b3be9326420cabe59c4778b", size = 10992722, upload-time = "2025-09-29T23:20:54.139Z" },
+]
+
+[[package]]
+name = "pandas-stubs"
+version = "3.0.5.260730"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c2/d2/dea4a3a56b7b5f69c5fbca9f14625fcf28e1a39a657e9833d4a10bcac593/pandas_stubs-3.0.5.260730.tar.gz", hash = "sha256:f70a232c57d93a5a2c81f8a53953e10891a5374bc92652277deb325e2e4d0ff3", size = 114631, upload-time = "2026-07-30T14:31:42.271Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/60/c2/959caec5c46f484b5f8bb6def4b0cf7a45ba6acda26f12b75142d98cc5ae/pandas_stubs-3.0.5.260730-py3-none-any.whl", hash = "sha256:60e90e3e1eda6937e337e243cbe6217e151c11137cd7eddf832af537c7310bfd", size = 174807, upload-time = "2026-07-30T14:31:41.17Z" },
 ]
 
 [[package]]

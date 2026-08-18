@@ -192,7 +192,9 @@ def validate_batch(batch: Batch, spec: ModelSpec) -> None:
 
 
 def _validate_required_keys(batch: Batch, spec: ModelSpec) -> None:
-    """Ensure every variable required by ``spec`` is present in ``batch``."""
+    """Ensure every variable required by ``spec`` is present in ``batch``.
+    and every variable in ``batch`` is in ``spec``
+    """
     groups: tuple[tuple[str, tuple[str, ...], dict[str, torch.Tensor]], ...] = (
         ("surf_vars", spec.surf_vars, batch.surf_vars),
         ("static_vars", spec.static_vars, batch.static_vars),
@@ -206,6 +208,16 @@ def _validate_required_keys(batch: Batch, spec: ModelSpec) -> None:
             received_str = "(none)" if len(actual) == 0 else ", ".join(sorted(actual))
             msg = (
                 f"{group_name}: missing {missing_str} "
+                f"(received keys {{{received_str}}}, expected keys {{{expected_str}}})"
+            )
+            raise BatchContractError(msg)
+        extra = [key for key in actual if key not in required]
+        if len(extra) > 0:
+            extra_str = ", ".join(extra)
+            expected_str = ", ".join(required)
+            received_str = "(none)" if len(actual) == 0 else ", ".join(sorted(actual))
+            msg = (
+                f"{group_name}: extra {extra_str} "
                 f"(received keys {{{received_str}}}, expected keys {{{expected_str}}})"
             )
             raise BatchContractError(msg)

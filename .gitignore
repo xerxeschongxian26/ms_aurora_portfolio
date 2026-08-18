@@ -17,6 +17,9 @@ build/
 .ipynb_checkpoints/
 notebooks/_scratch/
 
+# Scratch scripts (throwaway, debugger-friendly .py exploration - not a deliverable)
+scripts/_scratch/
+
 # ML artefacts (generated, not source)
 /data/
 outputs/
