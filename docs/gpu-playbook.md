@@ -1,15 +1,12 @@
 # GPU playbook (Lambda Labs)
 
-Stage 0 still does **not** develop on a rented GPU. This file is the runbook for Stage 1+
-sessions — and for an optional **lifecycle rehearsal** (spin up → configure → clone →
-build → run → export → **terminate**) so teardown stays muscle memory.
+Stage 1 GPU work is **closed** (2026-08-16). This file is the runbook to **reproduce** that session — HRES-T0 → `Aurora` 0.25° FT → global `2t` maps — and for any later paid GPU hour (Stage 2 eval). Debug the data path on CPU first; do not debug `HresT0Source` on the clock.
 
-**Standing rule (§7):** every paid session starts with a written definition of done and
-ends with a **full terminate** (not stop). Forgotten instances destroy the budget.
+**Standing rule:** every paid session starts with a written definition of done and ends with a **full terminate** (not stop). Forgotten instances destroy the budget.
 
-Validated once on **2026-07-21**: 1× A10, Lambda **GPU Base 22.0**, `PLATFORM=linux/amd64`
-CPU image build/run, artifacts `scp`'d home, then terminate. Lessons from that session
-are folded into the sections below.
+**Verified Stage 1 session (2026-08-16):** Lambda **1× A100 40 GB SXM4**, Virginia, **GPU Base 22.04**, `uname -m` = `x86_64`, `PLATFORM=linux/amd64`. First boot was plain Ubuntu 22.04 (no `nvidia-smi`) → **Terminate**, relaunch GPU Base. Entrypoint: `scripts/real_forecast.py` (image `CMD`). Four `2t` maps, eyeballed plausible. `scp` from the laptop. Instance **terminated**; console empty.
+
+A Stage 0 **CPU-image** lifecycle rehearsal (2026-07-21, 1× A10) is in the appendix. Do not use that path for a real forecast.
 
 ---
 
@@ -21,49 +18,43 @@ Copy, edit, keep visible until teardown:
 
 ```
 Date / timebox end: _______________  (hard stop — terminate even if DoD incomplete)
-SKU booked: _______________________  (prefer A100 40GB+ / H100; not A10-for-rehearsal)
-Image: GPU Base 22.0
+SKU booked: _______________________  (prefer A100 40GB+ / H100)
+Image: GPU Base 22.04
 ISA expected: x86_64 | aarch64     (fill from console, confirm with uname -m)
 PLATFORM: linux/amd64 | linux/arm64
 Hourly rate verified at booking: $_____ / hr
 Billing alarm / spend guard: wall-clock timer + terminate at timebox
 
-This session DoD (Stage 1 WP6 — tick as you go):
-  6a
+This session DoD (tick as you go):
   [ ] SSH as ubuntu; uname -m and nvidia-smi match the SKU
   [ ] Docker group active; GPU visible in container
       docker run --rm --gpus all nvidia/cuda:12.6.3-runtime-ubuntu22.04 nvidia-smi
   [ ] docker manifest inspect covers booked PLATFORM for 12.6.3-runtime-ubuntu22.04
-  [ ] Clone stage1; PLATFORM=… make docker-build-gpu (or docker build --target gpu) succeeds
-  [ ] Trivial CUDA forward inside the gpu image (torch.cuda.is_available + tiny tensor)
-  6b
+  [ ] Clone repo; PLATFORM=… make docker-build-gpu succeeds
+  [ ] Trivial CUDA forward inside the gpu image (torch.cuda.is_available)
   [ ] HF cache mounted; aurora-0.25-finetuned.ckpt loads
-  [ ] python scripts/real_forecast.py --steps 4  (HRES-T0 2022-06-15T12, naive datetime)
-  [ ] Eyeball: four 2t maps coherent, continents upright, weather evolves (not skill)
+  [ ] Forecast: scripts/real_forecast.py --steps 4  (HRES-T0 2022-06-15T12, naive datetime)
+  [ ] Eyeball: 2t maps coherent, continents upright, weather evolves (not skill)
   Teardown
   [ ] scp PNGs + logs from the laptop (not from the instance)
   [ ] Instance TERMINATED (not Stop); console gone; billing stopped
 
-Out of scope this session:
-  - Metrics / RMSE / Stage 2
-  - Regional cropping, optimization, extras-into-core
-  - WP7 README/roadmap
-  - Debugging the data path (that is CPU; abort and terminate if HresT0Source is the failure)
+Out of scope unless this session is Stage 2:
+  - RMSE / ACC / metrics
+  - Regional cropping, optimization, folding zarr/gcsfs into core
+  - Debugging HresT0Source on the GPU clock (abort and terminate)
   - Leaving the instance stopped overnight
 ```
 
 ### Billing / spend control
 
 - Re-check the **current hourly rate** and SKU availability at booking (both move).
-- Lambda may **not** expose a first-class billing alarm — use a wall-clock timebox
-  (e.g. 30–45 min for a Stage 0 rehearsal) and terminate when it ends.
-- Prefer the cheapest bookable single-GPU x86 SKU for rehearsal (often **1× A10**).
+- Lambda may **not** expose a first-class billing alarm — use a wall-clock timebox and terminate when it ends.
+- Stage 1 used **1× A100 40 GB**. Prefer GH200 when it is in stock; otherwise x86 A100/H100. Do not book a cheap A10 for a full-grid FT forecast.
 
 ### Persistent filesystem
 
-For a short rehearsal: **do not** attach a Lambda persistent filesystem. Use the
-instance local SSD only; `scp` artifacts home before terminate. Add a filesystem later
-if Stage 1+ needs data that must survive across instances.
+For a short session: **do not** attach a Lambda persistent filesystem. Use the instance local SSD; `scp` artifacts home before terminate.
 
 ---
 
@@ -72,10 +63,9 @@ if Stage 1+ needs data that must survive across instances.
 | Preference | SKU | ISA | `PLATFORM` | When |
 |---|---|---|---|---|
 | **Preferred** | Lambda **GH200** (H100, 96 GB) | `aarch64` | `linux/arm64` | When in stock |
-| **Working (2026-07)** | A10 / A100 / H100 on Lambda | `x86_64` | `linux/amd64` | GH200 unavailable |
+| **Working (2026-08)** | A100 / H100 on Lambda | `x86_64` | `linux/amd64` | GH200 unavailable (Stage 1 case) |
 
-Do **not** treat an x86 box as “the same as GH200.” Same Docker *recipe*, different
-host class. Confirm with `uname -m` **on the instance** (not on your Mac).
+Do **not** treat an x86 box as “the same as GH200.” Same Docker *recipe*, different host class. Confirm with `uname -m` **on the instance** (not on your Mac).
 
 | Where you run `uname` | Typical result |
 |---|---|
@@ -83,11 +73,7 @@ host class. Confirm with `uname -m` **on the instance** (not on your Mac).
 | Lambda A10 / A100 / H100 | `uname` → `Linux`; `uname -m` → `x86_64` |
 | Lambda GH200 | `uname` → `Linux`; `uname -m` → `aarch64` |
 
-**Stage 0 rehearsal default:** cheapest bookable `x86_64` GPU. Goal is the lifecycle,
-not throughput. Stage 0 uses the Dockerfile **`cpu`** image only.
-
-Host CUDA ceiling on the previously validated GH200 class is **13.0** → keep container
-CUDA in **12.4–12.8** when Stage 1 locks the GPU image.
+The GPU image is `nvidia/cuda:12.6.3-runtime-ubuntu22.04`. Keep container CUDA in **12.4–12.8**. Torch CUDA-index pin (`cu124`/`cu126`) is still a `TODO(stage-2)` in the Dockerfile; WP6 used `uv sync --frozen --extra forecast` without an explicit index and CUDA was available.
 
 ---
 
@@ -95,14 +81,8 @@ CUDA in **12.4–12.8** when Stage 1 locks the GPU image.
 
 1. Lambda Cloud console → create instance.
 2. Pick region/SKU with stock; **write down $/hr**.
-3. **Image (critical):** choose a **GPU-ready** image such as **GPU Base 22.0**
-   (Ubuntu 22.04 family). Prefer **22.04** over 24.04 to stay aligned with
-   `nvidia/cuda:*-ubuntu22.04` in the Dockerfile scaffold.
-4. **Do not** pick a plain “Ubuntu 22.04 / 24.04” base for GPU work unless you
-   already know it ships NVIDIA drivers. Lesson learned: plain Ubuntu on an A10
-   still shows the GPU in `lspci`, but **`nvidia-smi` is missing** — do **not**
-   `apt install nvidia-utils-*` from the distro hint list (wrong/old stacks).
-   **Terminate** and relaunch with **GPU Base** instead.
+3. **Image (critical):** **GPU Base 22.04** (Ubuntu 22.04 family). Prefer **22.04** over 24.04 to stay aligned with `nvidia/cuda:*-ubuntu22.04`.
+4. **Do not** pick a plain “Ubuntu 22.04 / 24.04” base. Lesson (Stage 1): plain Ubuntu still shows the GPU in `lspci`, but **`nvidia-smi` is missing**. Do **not** `apt install nvidia-utils-*`. **Terminate** and relaunch **GPU Base**.
 5. Attach your SSH public key at create time.
 6. Skip persistent filesystem for short sessions (§0).
 7. Wait until running; copy the public IP.
@@ -116,19 +96,17 @@ CUDA in **12.4–12.8** when Stage 1 locks the GPU image.
 ssh ubuntu@<INSTANCE_IP>
 ```
 
-User **must** be `ubuntu`. Lambda injects keys into `ubuntu`'s `authorized_keys`;
-custom usernames fail.
+User **must** be `ubuntu`. Lambda injects keys into `ubuntu`'s `authorized_keys`; custom usernames fail.
 
-If Cursor pops “application running on port 22”: that is the **SSH** port for this
-session, not Aurora or Docker. Dismiss and continue in the terminal.
+If Cursor pops “application running on port 22”: that is the **SSH** port for this session, not Aurora or Docker. Dismiss and continue in the terminal.
 
 ---
 
 ## 4. First-boot
 
 ```bash
-uname -m          # expect: x86_64 (A10/A100/H100) or aarch64 (GH200)
-nvidia-smi        # expect: the GPU you booked (A10, etc.)
+uname -m          # expect: x86_64 (A100/H100) or aarch64 (GH200)
+nvidia-smi        # expect: the GPU you booked
 # If nvidia-smi missing but lspci | grep -i nvidia shows the card:
 #   wrong OS image → terminate and relaunch with GPU Base (§2). Do not apt-install drivers.
 
@@ -151,43 +129,29 @@ groups            # must list docker
 docker info       # no permission errors on the socket
 ```
 
-**Lesson:** `usermod -aG docker` updates `/etc/group`, but Cursor/SSH sessions often
-keep the old group set → `permission denied … docker.sock`. `newgrp docker` (or a
-brand-new SSH login) fixes it. `sudo docker …` works as a temporary bypass; prefer
-fixing the group so later `make docker-build` does not need `sudo`.
+**Lesson:** `usermod -aG docker` updates `/etc/group`, but Cursor/SSH sessions often keep the old group set → `permission denied … docker.sock`. `newgrp docker` (or a brand-new SSH login) fixes it. Prefer fixing the group so `make docker-build-gpu` does not need `sudo`.
 
 ---
 
 ## 5. Toolkit regression (GPU visible in Docker)
 
-On a new SKU this is a **regression check**. If it fails, stop before building
-project images.
+On a new SKU this is a **regression check**. If it fails, stop before building project images.
 
 ```bash
 docker run --rm --gpus all nvidia/cuda:12.6.3-runtime-ubuntu22.04 nvidia-smi
 ```
 
-Expect the booked GPU (e.g. A10) inside the container output.
-
-| Flag / piece | Meaning |
-|---|---|
-| `--rm` | Delete the container when it exits |
-| `--gpus all` | Pass host GPUs in (needs NVIDIA Container Toolkit) |
-| image | CUDA 12.6.3 runtime on Ubuntu 22.04 |
-| `nvidia-smi` | Command run *inside* the container |
-
-Optional (Stage 1 lock-in later):
+Expect the booked GPU inside the container output.
 
 ```bash
 docker manifest inspect nvidia/cuda:12.6.3-runtime-ubuntu22.04
 ```
 
-Confirm a manifest exists for the platform you will use. The Dockerfile `gpu` stage
-still **`exit 1`** until Stage 1 — do not build `--target gpu` in Stage 0.
+Confirm a manifest exists for the platform you will use.
 
 ---
 
-## 6. Clone, build, run (CPU image + HF cache)
+## 6. Clone, build, run (GPU image + HRES-T0 forecast)
 
 ### Match `PLATFORM` to the instance (mandatory)
 
@@ -196,67 +160,54 @@ still **`exit 1`** until Stage 1 — do not build `--target gpu` in Stage 0.
 | `x86_64` | `linux/amd64` |
 | `aarch64` | `linux/arm64` |
 
-Makefile default is `linux/arm64` (GH200 / M1). On an A10, plain `make docker-build`
-builds the **wrong** arch and fails at `uv sync` with:
-
-```text
-exec /bin/sh: exec format error
-```
-
-That is **not** “uv missing” — it is an **ISA mismatch** (e.g. arm64 `uv` binary on
-x86). Always pass `PLATFORM` explicitly on cloud boxes.
+Makefile default is `linux/arm64` (GH200 / M1). On an A100, plain `make docker-build-gpu` builds the **wrong** arch and fails at `uv sync` with `exec format error`. Always pass `PLATFORM` explicitly on cloud boxes.
 
 ```bash
-git clone -b stage0-wp7 --single-branch \
-  https://github.com/xerxeschongxian26/ms_aurora_portfolio.git
+git clone https://github.com/xerxeschongxian26/ms_aurora_portfolio.git
 cd ms_aurora_portfolio
-# After WP7 merges: clone default branch / main is fine.
+# Until stage1 is merged to main:
+#   git clone -b stage1 --single-branch https://github.com/xerxeschongxian26/ms_aurora_portfolio.git
 
 export PLATFORM=linux/amd64   # on x86 Lambda; use linux/arm64 on GH200
-make docker-build PLATFORM="$PLATFORM"
-make docker-run PLATFORM="$PLATFORM"
+make docker-build-gpu PLATFORM="$PLATFORM"
 ```
 
-What this does:
+The **`gpu`** stage installs `uv sync --frozen --no-dev --extra forecast` and `CMD` is `python scripts/real_forecast.py`. That script loads WB2 HRES-T0, runs `run_rollout` on `aurora-finetuned`, and writes one `2t` PNG per step. Init is naive `datetime(2022, 6, 15, 12, 0)` — an aware UTC datetime raises a pandas index `TypeError`. CUDA fail-fast: the script returns 1 if `torch.cuda.is_available()` is false.
 
-- Builds the Dockerfile **`cpu`** stage for that platform (tags
-  `aurora-inference:cpu-linux-amd64` / `cpu-linux-arm64`).
-- Runs `scripts/synthetic_forward.py` with `HF_HOME=/cache/huggingface` and
-  `$HOME/.cache/huggingface` bind-mounted.
-- May download the pinned HF checkpoint on first run — expected.
+Weights are **not** baked in. Mount the host Hugging Face cache. The run needs network for GCS (`gs://weatherbench2`) and, on a cache miss, the fine-tuned checkpoint.
 
-**HF Hub warning** (“unauthenticated requests… set a HF_TOKEN”): optional for this
-public Aurora checkpoint. A token raises rate limits; skip unless you hit 429s or
-very slow downloads. Never bake tokens into the image.
-
-**Do not** `docker build --target gpu` in Stage 0.
-
-### What `docker-run` produces
-
-The synthetic forward **does not write project result files** — it logs shapes / timings /
-peak RSS / the no-skill banner to **stdout**, then the container is removed (`--rm`).
-
-What *does* persist on the instance:
-
-- HF cache under `~/.cache/huggingface/` (via the mount)
-- The Docker image you built
-
-Capture session proof yourself:
+**Bind-mount `outputs/`.** `make docker-run-gpu` uses `--rm` and does **not** mount `/app/outputs`, so maps vanish with the container. Stage 1 used:
 
 ```bash
-mkdir -p ~/session-artifacts
-make docker-run PLATFORM="$PLATFORM" 2>&1 | tee ~/session-artifacts/synthetic_forward.log
+mkdir -p outputs ~/session-artifacts
+docker run --gpus all \
+  -e HF_HOME=/cache/huggingface \
+  -v "$HOME/.cache/huggingface:/cache/huggingface" \
+  -v "$(pwd)/outputs:/app/outputs" \
+  --rm \
+  --platform "$PLATFORM" \
+  aurora-inference:gpu-linux-amd64 \
+  2>&1 | tee ~/session-artifacts/real_forecast.log
+```
+
+`--gpus all` is correct on a 1-GPU box. PNGs: `outputs/real_forecast_2t_stepNN.png` (gitignored).
+
+Without Docker, on the instance:
+
+```bash
+uv sync --extra forecast --frozen
+python scripts/real_forecast.py --steps 4
+```
+
+**HF Hub warning** (“set a HF_TOKEN”): optional for this public checkpoint. Never bake tokens into the image.
+
+Capture host proof as well:
+
+```bash
 uname -m > ~/session-artifacts/uname.txt
 nvidia-smi > ~/session-artifacts/nvidia-smi.txt
 date -u > ~/session-artifacts/finished_utc.txt
 ```
-
-| Command | Purpose |
-|---|---|
-| `mkdir -p ~/session-artifacts` | Folder to `scp` home |
-| `… \| tee …/synthetic_forward.log` | Run again; show output and save log (`2>&1` includes warnings) |
-| `uname -m > …` | Record instance ISA |
-| `nvidia-smi > …` | Record GPU / driver snapshot |
 
 ---
 
@@ -269,12 +220,11 @@ Run `scp` from your **laptop**, not from the instance.
 mkdir -p ~/Downloads/lambda-session-$(date +%Y%m%d)
 scp -r ubuntu@<INSTANCE_IP>:~/session-artifacts \
   ~/Downloads/lambda-session-$(date +%Y%m%d)/
+scp -r ubuntu@<INSTANCE_IP>:~/ms_aurora_portfolio/outputs \
+  ~/Downloads/lambda-session-$(date +%Y%m%d)/
 ```
 
-**Why not from the instance?** `scp ubuntu@<same-IP>:…` tries to SSH **into** the
-box again. The **private** key lives on your laptop; the instance only has your
-**public** key → `Permission denied (publickey)`. Also `~/Downloads` on the instance
-is not your Mac’s Downloads folder.
+Adjust the repo path if you cloned elsewhere. **Why not from the instance?** `scp ubuntu@<same-IP>:…` tries to SSH **into** the box again. The **private** key lives on your laptop.
 
 Confirm files arrived locally before teardown.
 
@@ -282,15 +232,14 @@ Confirm files arrived locally before teardown.
 
 ## 8. TEARDOWN (mandatory)
 
-1. `scp` done (section 7) — verify files on the laptop.
+1. `scp` done (section 7) — verify PNGs and logs on the laptop.
 2. Lambda console → **Terminate** the instance — **not** Stop.
    Stopped instances can still bill; closing the laptop/Cursor tab does nothing.
 3. Refresh until the instance is **gone**.
 4. Confirm usage is no longer accruing.
 5. Tick the DoD teardown boxes.
 
-If the timebox ends mid-debug: **terminate anyway**. Resume later on a new box with
-a new written DoD.
+If the timebox ends mid-debug: **terminate anyway**. Resume later on a new box with a new written DoD.
 
 ---
 
@@ -298,18 +247,20 @@ a new written DoD.
 
 - Re-verify $/hr at every launch.
 - Use a hard timebox when Lambda has no in-console billing alarm.
-- One Stage 0 rehearsal is enough to validate this playbook; further GPU image work
-  waits for Stage 1.
+- Stage 1 GPU session is done; do not leave a box up “for Stage 2 later.”
 
 ---
 
-## 10. Pitfalls checklist (from 2026-07 rehearsal)
+## 10. Pitfalls checklist
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `nvidia-smi` not found; `lspci` shows A10 | Plain Ubuntu image, no driver stack | Terminate; relaunch **GPU Base 22.0** (or equivalent). Do not apt-install `nvidia-utils-*`. |
+| `nvidia-smi` not found; `lspci` shows the GPU | Plain Ubuntu image, no driver stack | Terminate; relaunch **GPU Base 22.04**. Do not apt-install `nvidia-utils-*`. |
 | `permission denied … docker.sock` | `usermod` done but shell groups stale | `newgrp docker` or fresh SSH; or temporary `sudo docker` |
-| `exec format error` at `uv sync` | Built default `linux/arm64` on x86 host | `make docker-build PLATFORM=linux/amd64` |
+| `exec format error` at `uv sync` | Built default `linux/arm64` on x86 host | `make docker-build-gpu PLATFORM=linux/amd64` |
+| `real_forecast.py` exits 1 immediately | No CUDA in the container | Confirm `--gpus all` and GPU Base image; `torch.cuda.is_available()` |
+| PNGs gone after `docker run` | `--rm` without `/app/outputs` mount | Bind-mount `$(pwd)/outputs:/app/outputs` (README Quickstart) |
+| `TypeError` comparing datetime to pandas index | Aware UTC `datetime` vs naive store index | Use naive `datetime(2022, 6, 15, 12, 0)` |
 | HF “set a HF_TOKEN” warning | Unauthenticated Hub access | Optional; ignore if download succeeds |
 | `scp` → `Permission denied (publickey)` | Ran `scp` *on* the instance toward itself | Run `scp` from the **Mac** |
 | Nested `ms_aurora_portfolio/` on laptop | Accidental `git clone` inside local repo | `rm -rf` the nested copy; clone only on the instance |
@@ -317,13 +268,27 @@ a new written DoD.
 
 ---
 
-## Quick reference — Stage 0 x86 rehearsal
+## Quick reference — Stage 1 x86 GPU forecast
 
 ```text
-DoD + timebox → launch A10 + GPU Base 22.0 (no persistent FS)
+DoD + timebox → launch A100 + GPU Base 22.04 (no persistent FS)
 → ssh ubuntu@IP → uname -m / nvidia-smi
 → usermod -aG docker + newgrp docker (or re-login)
 → docker run --rm --gpus all nvidia/cuda:12.6.3-runtime-ubuntu22.04 nvidia-smi
-→ clone -b stage0-wp7 → PLATFORM=linux/amd64 make docker-build && make docker-run
-→ tee session-artifacts → scp from Mac → TERMINATE → console gone
+→ clone → PLATFORM=linux/amd64 make docker-build-gpu
+→ docker run --gpus all -v HF cache -v outputs --rm --platform linux/amd64 aurora-inference:gpu-linux-amd64
+→ eyeball outputs/real_forecast_2t_stepNN.png
+→ scp from Mac → TERMINATE → console gone
+```
+
+---
+
+## Appendix — Stage 0 CPU-image rehearsal (historical)
+
+Validated **2026-07-21** on 1× A10, GPU Base, `PLATFORM=linux/amd64`. Goal was lifecycle only: `make docker-build` / `make docker-run` → `scripts/synthetic_forward.py` (no skill, no PNGs). Do **not** use this as the Stage 1 forecast path.
+
+```bash
+export PLATFORM=linux/amd64
+make docker-build PLATFORM="$PLATFORM"
+make docker-run PLATFORM="$PLATFORM"
 ```
