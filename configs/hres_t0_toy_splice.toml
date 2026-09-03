@@ -1,0 +1,16 @@
+# HRES-T0 splice coverage (download / local store).
+# splice_path: where this campaign is written (zarr directory).
+#
+# Timestamps are NOT an independent list of inits. Each init t needs
+#   t-6h (Aurora T=2 input), t, and t+6h … t+n_rollout_steps*6h (truth).
+# Packed 00/12 inits SHARE those 6-hourly times (overlapping windows).
+# needed_times is the UNION, so 2 inits × 3 steps is 7 unique times,
+# not 2 × 5.
+# Toy window: 2022-01-01T06 → 2022-01-02T18.
+
+splice_path = "data/splice_hres_t0_toy.zarr"
+
+first_init = "2022-01-01T12:00:00"
+n_inits = 2
+init_stride_hours = 12
+n_rollout_steps = 3
