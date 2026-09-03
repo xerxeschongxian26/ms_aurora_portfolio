@@ -38,6 +38,7 @@ This session DoD (tick as you go):
   Teardown
   [ ] scp PNGs + logs from the laptop (not from the instance)
   [ ] Instance TERMINATED (not Stop); console gone; billing stopped
+  [ ] If NFS was attached: either keep it only with a written GiB-month $ (§0), or DELETE the filesystem (terminate does not stop NFS billing)
 
 Out of scope unless this session is Stage 2:
   - RMSE / ACC / metrics
@@ -52,9 +53,43 @@ Out of scope unless this session is Stage 2:
 - Lambda may **not** expose a first-class billing alarm — use a wall-clock timebox and terminate when it ends.
 - Stage 1 used **1× A100 40 GB**. Prefer GH200 when it is in stock; otherwise x86 A100/H100. Do not book a cheap A10 for a full-grid FT forecast.
 
-### Persistent filesystem
+### Persistent filesystem (Lambda NFS)
 
-For a short session: **do not** attach a Lambda persistent filesystem. Use the instance local SSD; `scp` artifacts home before terminate.
+Lambda **persistent filesystems** are NFS volumes: they mount on the VM, **survive instance terminate**, and bill **while the filesystem exists** — including when no instance is attached.
+
+**Short GPU session (Stage 1-style, hours not days):** **do not** attach one. Use the instance local SSD; `scp` artifacts home before terminate.
+
+**Reuse across Stage 2/3 sessions (HRES-T0 splice, FP forecasts):** attach **at launch**, **same region** as the GPU, only after the monthly $ is written below. Delete the filesystem at phase closeout — terminating the VM does **not** stop NFS billing.
+
+#### Rate (confirm in the launch UI; it moves)
+
+Lambda’s published example matches the rate shown at instance launch (2026-09):
+
+> Filesystems are billed per GiB **used** per month in **one-hour** increments. For example, at **$0.20 per GiB per month**:
+>
+> - 1,000 GiB continuously for a full month (720 hours) → **$200.00**
+> - 1,000 GiB continuously for a full day (24 hours) → **$6.67**
+
+So: `cost ≈ (GiB used) × $0.20 × (hours / 720)`. You are not stuck with a calendar month if you **delete** the volume.
+
+#### HRES-T0 size → NFS $ (uncompressed ballpark, $0.20/GiB-month)
+
+Per 6 h timestamp at 0.25° (721×1440, float32): 9 Aurora fields (4 surf + 5 atmos × 13 levels) ≈ **0.267 GiB**. Unused WB2 vars (`10m_wind_speed`, `vertical_velocity`, precip, …) are **not** Aurora inputs — do not copy them onto NFS.
+
+| What you persist | Size (order of mag.) | Full month | ~24 h |
+|---|---|---|---|
+| Dev splice: 10 overlapping 00/12 inits, 14.75 d (`2022-01-01T06`–`2022-01-16T00`), 9 Aurora vars, **60** times | ~16 GiB | **~$3** | negligible |
+| 2022 + Jan 2023 tail, **9 Aurora vars only**, ~1500 times | ~400 GiB | **~$80** | ~$2.70 |
+| Full HRES-T0 including unused vars | ~550 GiB | **$110** | ~$3.70 |
+
+Predictions are **on top of** the analysis splice. Overlapping inits still produce **N × 40** distinct rollouts (Aurora output grid **720×1440**). Ten inits × 40 steps, full fields ≈ **~107 GiB** extra (~**+$21/month**); z500+t850 only ≈ **~3 GiB**.
+
+#### Decision rule
+
+- Dev / plumbing: laptop or the **~16 GiB** splice. NFS is optional (~$3/month) if you will remount it.
+- Skill vs Fig H7 / many GPU days: NFS for the **Aurora-only year** (~$80/month), not the 18-variable store (~$110/month).
+- One or two GPU days and no reuse: ephemeral SSD + subset download; **do not** leave 400–550 GiB sitting idle for a month.
+- Record at booking: rate, GiB, monthly $ if left up. **Delete the filesystem** when Stage 2/3 stops — same discipline as terminating the instance.
 
 ---
 
@@ -84,7 +119,7 @@ The GPU image is `nvidia/cuda:12.6.3-runtime-ubuntu22.04`. Keep container CUDA i
 3. **Image (critical):** **GPU Base 22.04** (Ubuntu 22.04 family). Prefer **22.04** over 24.04 to stay aligned with `nvidia/cuda:*-ubuntu22.04`.
 4. **Do not** pick a plain “Ubuntu 22.04 / 24.04” base. Lesson (Stage 1): plain Ubuntu still shows the GPU in `lspci`, but **`nvidia-smi` is missing**. Do **not** `apt install nvidia-utils-*`. **Terminate** and relaunch **GPU Base**.
 5. Attach your SSH public key at create time.
-6. Skip persistent filesystem for short sessions (§0).
+6. Persistent filesystem: skip for short sessions; Stage 2/3 HRES-T0 splice only after the §0 NFS cost is written down (same region, attach at launch).
 7. Wait until running; copy the public IP.
 8. Start a local timer for the timebox.
 
@@ -236,8 +271,9 @@ Confirm files arrived locally before teardown.
 2. Lambda console → **Terminate** the instance — **not** Stop.
    Stopped instances can still bill; closing the laptop/Cursor tab does nothing.
 3. Refresh until the instance is **gone**.
-4. Confirm usage is no longer accruing.
-5. Tick the DoD teardown boxes.
+4. Confirm **instance** usage is no longer accruing.
+5. If you attached a persistent filesystem: it **keeps billing** after terminate. Delete it at phase closeout (§0), or you pay ~$0.20/GiB-month on idle data.
+6. Tick the DoD teardown boxes.
 
 If the timebox ends mid-debug: **terminate anyway**. Resume later on a new box with a new written DoD.
 
@@ -245,9 +281,10 @@ If the timebox ends mid-debug: **terminate anyway**. Resume later on a new box w
 
 ## 9. Billing / spend (recap)
 
-- Re-verify $/hr at every launch.
+- Re-verify GPU **$/hr** and NFS **$/GiB-month** at every launch (both move).
 - Use a hard timebox when Lambda has no in-console billing alarm.
 - Stage 1 GPU session is done; do not leave a box up “for Stage 2 later.”
+- NFS is a second bill: ~$0.20/GiB-month on **used** GiB, hourly increments, **including with no VM**. Dev splice ~$3/month; Aurora-only 2022 ~$80/month; full unused-var dump ~$110/month. Delete the volume when the phase ends.
 
 ---
 
@@ -265,6 +302,7 @@ If the timebox ends mid-debug: **terminate anyway**. Resume later on a new box w
 | `scp` → `Permission denied (publickey)` | Ran `scp` *on* the instance toward itself | Run `scp` from the **Mac** |
 | Nested `ms_aurora_portfolio/` on laptop | Accidental `git clone` inside local repo | `rm -rf` the nested copy; clone only on the instance |
 | Cursor “port 22” toast | SSH session detected | Ignore — not the app server |
+| NFS still billing after GPU terminate | Filesystem is independent of the instance | Delete the persistent filesystem in the console; confirm GiB-month usage stops |
 
 ---
 
