@@ -9,11 +9,13 @@ from aurora_inference.evaluation.evaluation_schedule import (
     build_eval_schedule,
     load_eval_schedule_config,
 )
+from aurora_inference.evaluation.metrics import MSE
 
 __all__ = [
     "EvalSchedule",
     "EvalScheduleConfig",
     "InitPair",
+    "MSE",
     "SpliceCoverageError",
     "assert_times_available",
     "build_eval_schedule",
