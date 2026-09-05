@@ -2,10 +2,54 @@
 
 from __future__ import annotations
 
+import logging
 import platform
 import resource
+import sys
+from pathlib import Path
 
-__all__ = ["peak_rss_bytes"]
+__all__ = [
+    "configure_run_logging",
+    "normalize_run_tag",
+    "peak_rss_bytes",
+    "run_artifact_dir",
+]
+
+
+def normalize_run_tag(tag: str | None) -> str | None:
+    """Return a stripped tag, or ``None`` if empty. Reject path separators."""
+    if tag is None:
+        return None
+    stripped = tag.strip()
+    if stripped == "":
+        return None
+    if "/" in stripped or "\\" in stripped or ".." in stripped:
+        msg = f"run tag must not contain path separators or '..' (received {tag!r})"
+        raise ValueError(msg)
+    return stripped
+
+
+def run_artifact_dir(base: Path, tag: str | None) -> Path:
+    """Return ``base`` or ``base / tag``, creating the directory."""
+    directory = base / tag if tag is not None else base
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def configure_run_logging(log_path: Path, *, tag: str | None = None) -> None:
+    """Send INFO logs to stdout and ``log_path``. Emit ``tag`` if set."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        handlers=(
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler(log_path, encoding="utf-8"),
+        ),
+        force=True,
+    )
+    if tag is not None:
+        logging.getLogger(__name__).info("run tag: %s", tag)
 
 
 def peak_rss_bytes() -> int:
