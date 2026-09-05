@@ -5,6 +5,7 @@ has been fine-tuned on the HRES-T0 dataset.
 
 uv sync --extra forecast
 python scripts/real_forecast.py --steps 4 --tag b1-s4
+python scripts/real_forecast.py --steps 1 --batch-size 2 --tag b2-s1
 """
 
 from __future__ import annotations
@@ -13,10 +14,12 @@ import argparse
 import logging
 import sys
 import time
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
 import torch
+from aurora import Batch
 from plot_forecast import plot_batch_2t
 
 from aurora_inference.config import GCS_STORE_LINK
@@ -34,7 +37,7 @@ from aurora_inference.model.loader import load_model
 
 _LOG = logging.getLogger(__name__)
 
-_MODEL_NAME =  "aurora-finetuned"
+_MODEL_NAME = "aurora-finetuned"
 _DEVICE = "cuda"
 _DEFAULT_STEPS = 4
 _INIT_TIME = datetime(2022, 6, 15, 12, 0)
@@ -42,6 +45,29 @@ _OUTPUT_DIR = Path("outputs")
 
 _SKILL_BANNER = "=== FORECAST SKILL === Aurora performs a real forecast."
 _MIB = 1024 * 1024
+
+
+def _repeat_batch(batch: Batch, times: int) -> Batch:
+    """Stack ``batch`` ``times`` times along dim 0 with real copies, not expand.
+
+    Copies ``surf_vars`` and ``atmos_vars``. Leaves ``static_vars``, ``lat``, and
+    ``lon`` shared. Repeats ``metadata.time`` so ``len(time) == B``.
+    """
+    if times < 1:
+        msg = f"times must be >= 1 (got {times})"
+        raise ValueError(msg)
+    if times == 1:
+        return batch
+
+    def _repeat_b(tensor: torch.Tensor) -> torch.Tensor:
+        return tensor.repeat(times, *((1,) * (tensor.ndim - 1)))
+
+    return Batch(
+        surf_vars={key: _repeat_b(tensor) for key, tensor in batch.surf_vars.items()},
+        atmos_vars={key: _repeat_b(tensor) for key, tensor in batch.atmos_vars.items()},
+        static_vars=batch.static_vars,
+        metadata=replace(batch.metadata, time=tuple(batch.metadata.time) * times),
+    )
 
 
 def _cuda_device_index(device: torch.device) -> int:
@@ -105,6 +131,15 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=None,
         help="optional run label; writes logs and PNGs under outputs/<tag>/",
     )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1,
+        help=(
+            "repeat the loaded B=1 batch this many times with real copies "
+            "(memory probe; default 1). Not unique inits."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -114,6 +149,9 @@ def main(argv: list[str] | None = None) -> int:
         tag = normalize_run_tag(args.tag)
     except ValueError as exc:
         print(exc, file=sys.stderr)
+        return 2
+    if args.batch_size < 1:
+        print(f"batch-size must be >= 1 (got {args.batch_size})", file=sys.stderr)
         return 2
     output_dir = run_artifact_dir(_OUTPUT_DIR, tag)
     configure_run_logging(output_dir / "real_forecast.log", tag=tag)
@@ -130,16 +168,18 @@ def main(argv: list[str] | None = None) -> int:
     static_vars = get_hres_t0_static()
     source = HresT0Source(ZARR_DATA=zarr_data, STATIC_VARS=static_vars)
     batch = source.load(_INIT_TIME, AURORA_PRETRAINED_SPEC)
+    batch = _repeat_batch(batch, args.batch_size)
     validate_batch(batch, AURORA_PRETRAINED_SPEC)
     _reset_vram_peak(_DEVICE)
     batch = batch.to(_DEVICE)
     _log_mem("after batch.to")
 
     _LOG.info(
-        "input: surf 2t=%s atmos t=%s, init=%s device=%s",
+        "input: surf 2t=%s atmos t=%s, init=%s batch_size=%d device=%s",
         tuple(batch.surf_vars["2t"].shape),
         tuple(batch.atmos_vars["t"].shape),
         _INIT_TIME.isoformat(),
+        args.batch_size,
         _DEVICE,
     )
 
