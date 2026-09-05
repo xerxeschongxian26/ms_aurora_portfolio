@@ -7,6 +7,7 @@ with no region mask (``weatherbench2.metrics``, Apache-2.0, Google LLC).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
 import numpy as np
 import xarray as xr
@@ -31,14 +32,14 @@ def _cell_area_from_latitude(points: np.ndarray) -> np.ndarray:
     _assert_increasing(bounds)
     upper = bounds[1:]
     lower = bounds[:-1]
-    return np.sin(upper) - np.sin(lower)
+    return cast(np.ndarray, np.sin(upper) - np.sin(lower))
 
 
 def get_lat_weights(ds: xr.Dataset) -> xr.DataArray:
     """Latitude/area weights from the dataset ``latitude`` coordinate."""
     weights = _cell_area_from_latitude(np.deg2rad(ds.latitude.data))
     weights /= np.mean(weights)
-    return ds.latitude.copy(data=weights)
+    return cast(xr.DataArray, ds.latitude.copy(data=weights))
 
 
 def _spatial_average(dataset: xr.Dataset, *, skipna: bool) -> xr.Dataset:
