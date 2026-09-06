@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -42,7 +43,12 @@ from aurora_inference.evaluation.evaluation_schedule import (
 from aurora_inference.evaluation.grids import as_naive_datetime, score_lead_rows
 from aurora_inference.evaluation.tables import load_rmse_rows, write_rmse_tables
 from aurora_inference.inference.forward import run_rollout
-from aurora_inference.logging import configure_run_logging, normalize_run_tag, run_artifact_dir
+from aurora_inference.logging import (
+    configure_run_logging,
+    normalize_run_tag,
+    peak_rss_bytes,
+    run_artifact_dir,
+)
 from aurora_inference.model.loader import load_model
 
 _LOG = logging.getLogger(__name__)
@@ -51,6 +57,55 @@ _MODEL_NAME = "aurora-finetuned"
 _DEVICE = "cuda"
 _DEFAULT_ROLLOUT = Path("configs/hres_t0_toy_rollout.toml")
 _OUTPUT_DIR = Path("outputs")
+_MIB = 1024 * 1024
+
+
+def _cuda_device_index(device: torch.device) -> int:
+    if device.index is not None:
+        return device.index
+    return torch.cuda.current_device()
+
+
+def _vram_bytes(device: str) -> tuple[int, int] | None:
+    """Return ``(allocated_now, allocated_peak)`` in bytes, or ``None`` if not CUDA."""
+    torch_device = torch.device(device)
+    if torch_device.type != "cuda" or not torch.cuda.is_available():
+        return None
+    torch.cuda.synchronize(torch_device)
+    index = _cuda_device_index(torch_device)
+    return (
+        int(torch.cuda.memory_allocated(index)),
+        int(torch.cuda.max_memory_allocated(index)),
+    )
+
+
+def _reset_vram_peak(device: str) -> None:
+    """Reset the CUDA allocation high-water mark. No-op if not CUDA."""
+    torch_device = torch.device(device)
+    if torch_device.type != "cuda" or not torch.cuda.is_available():
+        return
+    torch.cuda.synchronize(torch_device)
+    torch.cuda.reset_peak_memory_stats(_cuda_device_index(torch_device))
+
+
+def _log_mem(label: str) -> None:
+    """Log host peak RSS and CUDA allocated/peak at a pipeline seam.
+
+    VRAM peak is since the last ``_reset_vram_peak`` (one phase), not process start.
+    """
+    rss_mib = peak_rss_bytes() / _MIB
+    vram = _vram_bytes(_DEVICE)
+    if vram is None:
+        _LOG.info("%s: peak RSS=%.2f MiB (VRAM n/a, device=%s)", label, rss_mib, _DEVICE)
+        return
+    now_bytes, peak_bytes = vram
+    _LOG.info(
+        "%s: peak RSS=%.2f MiB  VRAM now=%.2f MiB  VRAM peak=%.2f MiB",
+        label,
+        rss_mib,
+        now_bytes / _MIB,
+        peak_bytes / _MIB,
+    )
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -141,14 +196,26 @@ def _run_init(
     init_time = as_naive_datetime(init_pair.init_time)
     batch = source.load(init_time, spec)
     validate_batch(batch, spec)
-    batch = batch.to(_DEVICE)
     _LOG.info(
         "init_id=%s init_time=%s steps=%s",
         init_pair.init_id,
         init_time.isoformat(),
         init_pair.n_rollout_steps,
     )
+    _reset_vram_peak(_DEVICE)
+    batch = batch.to(_DEVICE)
+    _log_mem(f"init_id={init_pair.init_id} after batch.to")
+
+    _reset_vram_peak(_DEVICE)
+    rollout_started = time.perf_counter()
     predictions = _rollout_offload(model, batch, init_pair.n_rollout_steps)
+    _LOG.info(
+        "init_id=%s run_rollout wall time: %.2fs for %d steps",
+        init_pair.init_id,
+        time.perf_counter() - rollout_started,
+        init_pair.n_rollout_steps,
+    )
+    _log_mem(f"init_id={init_pair.init_id} after rollout")
     del batch
 
     rows: list[dict[str, Any]] = []
@@ -173,6 +240,7 @@ def _run_init(
             len(lead_rows),
         )
     del predictions
+    _log_mem(f"init_id={init_pair.init_id} after score")
     return rows
 
 
@@ -208,8 +276,15 @@ def main(argv: list[str] | None = None) -> int:
         _LOG.error("device=%s but CUDA is unavailable", _DEVICE)
         return 1
 
+    _reset_vram_peak(_DEVICE)
     source = _open_hres_source(schedule.config.splice_path)
+    _log_mem("after source open")
+
+    _reset_vram_peak(_DEVICE)
+    load_started = time.perf_counter()
     model = _load_model_once()
+    _LOG.info("model load wall time: %.2fs", time.perf_counter() - load_started)
+    _log_mem("after model load")
 
     init_pairs = schedule.init_pairs
     if args.max_inits is not None:
@@ -230,6 +305,7 @@ def main(argv: list[str] | None = None) -> int:
         _LOG.error("no RMSE rows produced")
         return 1
     _write_mean_rmse_table(rows, output_dir)
+    _log_mem("after campaign")
     return 0
 
 
