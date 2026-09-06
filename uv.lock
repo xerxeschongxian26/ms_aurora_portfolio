@@ -304,6 +304,7 @@ forecast = [
     { name = "gcsfs" },
     { name = "matplotlib" },
     { name = "pandas" },
+    { name = "xarray" },
     { name = "zarr" },
 ]
 notebooks = [
@@ -358,6 +359,7 @@ requires-dist = [
     { name = "torch", specifier = ">=2.11.0" },
     { name = "weatherbench2", marker = "extra == 'notebooks'", git = "https://github.com/google-research/weatherbench2.git" },
     { name = "xarray", marker = "extra == 'dev'", specifier = ">=2025.1.0" },
+    { name = "xarray", marker = "extra == 'forecast'", specifier = ">=2025.1.0" },
     { name = "zarr", marker = "extra == 'dev'", specifier = ">=3.2.1" },
     { name = "zarr", marker = "extra == 'forecast'", specifier = ">=3.2.1" },
     { name = "zarr", marker = "extra == 'notebooks'", specifier = ">=3.2.1" },

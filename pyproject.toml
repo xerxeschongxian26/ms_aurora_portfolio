@@ -41,13 +41,15 @@ notebooks = [
     "weatherbench2",
 ]
 
-# This extra dependency is for real_forecast.py / GPU image
+# This extra dependency is for real_forecast.py / eval_rmse.py / GPU image
 # - also includes the packages from viz via self referencing "aurora-inference[viz]"
+# - xarray is required by evaluation.metrics / eval_rmse (not only the dev extra)
 forecast = [
     "zarr>=3.2.1",
     "gcsfs>=2026.6.0",
     "aurora-inference[viz]",
     "pandas",
+    "xarray>=2025.1.0",
 ]
 
 # WP5 quick-look map only. Not imported by src/; install with: uv sync --extra viz

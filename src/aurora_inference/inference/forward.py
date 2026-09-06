@@ -21,6 +21,7 @@ def run_rollout(
     steps: int,
     *,
     spec: ModelSpec = AURORA_PRETRAINED_SPEC,
+    offload_to_cpu: bool = False,
 ) -> list[Batch]:
     """Roll the model forward ``steps`` times and return one ``Batch`` per lead time.
 
@@ -33,6 +34,9 @@ def run_rollout(
         batch: Input batch with T=2, validated against ``spec`` before rollout.
         steps: Number of 6-hour lead times to produce (must be >= 1).
         spec: Variable/level contract for the input batch.
+        offload_to_cpu: If True, copy each yielded pred to CPU (new ``Batch``) so
+            VRAM does not accumulate a 40-step list. Does not mutate the GPU
+            tensors ``rollout`` still uses for the next-step ``torch.cat``.
 
     Returns:
         ``steps`` batches, each with time dim 1, in lead-time order
@@ -50,7 +54,10 @@ def run_rollout(
     validate_batch(batch, spec)
 
     with torch.inference_mode():
-        predictions = list(rollout(model, batch, steps))
+        if offload_to_cpu:
+            predictions = [pred.to("cpu") for pred in rollout(model, batch, steps)]
+        else:
+            predictions = list(rollout(model, batch, steps))
 
     for pred in predictions:
         _assert_output_time_dim_is_one(pred)

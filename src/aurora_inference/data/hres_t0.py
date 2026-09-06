@@ -33,6 +33,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, cast
 
 import gcsfs
@@ -44,7 +45,7 @@ from aurora import Batch, Metadata
 
 from aurora_inference.contract import AURORA_PRETRAINED_SPEC, ModelSpec, validate_input_times
 
-__all__ = ["HresT0Source"]
+__all__ = ["HresT0Source", "open_connection_to_gcs", "open_local_zarr"]
 
 _WEATHER_DTYPE = torch.float32
 OUT_SAMPLE_START = pd.Timestamp("2022-01-01 00:00:00")
@@ -117,6 +118,19 @@ def open_connection_to_gcs(gcs_store_link: str) -> zarr.Group:
     result = zarr.open(store, mode="r")
     assert isinstance(result, zarr.Group), (
         f"expected a zarr.Group at {gcs_store_link}, got {type(result)}"
+    )
+    return result
+
+
+def open_local_zarr(path: Path) -> zarr.Group:
+    """Open a local HRES-T0 zarr group (splice or fixture), not GCS."""
+    resolved = path if path.is_absolute() else Path.cwd() / path
+    if not resolved.exists():
+        msg = f"splice not found at {resolved}"
+        raise FileNotFoundError(msg)
+    result = zarr.open(resolved, mode="r")
+    assert isinstance(result, zarr.Group), (
+        f"expected a zarr.Group at {resolved}, got {type(result)}"
     )
     return result
 
