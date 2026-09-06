@@ -1,0 +1,11 @@
+# Rollout campaign matching configs/hres_t0_2022_spread_splice.toml.
+# Coverage: this run's needed_times must be a SUBSET of the splice time index.
+#
+# 30 unique 00/12 UTC inits across 2022 (8/7/7/8 per quarter), 40 steps (10 d).
+
+splice_path = "data/splice_hres_t0_2022_spread.zarr"
+
+first_init = "2022-01-01T12:00:00"
+n_inits = 30
+init_stride_hours = 300
+n_rollout_steps = 40

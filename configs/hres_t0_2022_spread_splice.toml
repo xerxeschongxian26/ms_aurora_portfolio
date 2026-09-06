@@ -1,0 +1,19 @@
+# 2022 year-spread splice (download / local store).
+# splice_path: where this campaign is written (zarr directory).
+#
+# Subsample of the paper/WB2 protocol (every 00/12 UTC in 2022, leads to 10 d).
+# One regular grid the current scheduler can express: 30 inits, 12.5 d stride
+# (300 h). Alternates 00/12 UTC and lands 8/7/7/8 inits in Q1–Q4.
+#
+# Windows do not overlap (stride 12.5 d > 10 d + 6 h), so needed_times is
+# 30 × 42 = 1260 stamps: 2022-01-01T06 → 2023-01-09T00 (last lead in the
+# HRES-T0 store tail). Expect on the order of ~300 GiB on disk.
+#
+# Inits: 2022-01-01T12 … 2022-12-30T00.
+
+splice_path = "data/splice_hres_t0_2022_spread.zarr"
+
+first_init = "2022-01-01T12:00:00"
+n_inits = 30
+init_stride_hours = 300
+n_rollout_steps = 40

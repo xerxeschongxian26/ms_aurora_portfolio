@@ -15,6 +15,8 @@ from aurora_inference.evaluation.evaluation_schedule import (
 _REPO = Path(__file__).resolve().parents[1]
 _TOY_SPLICE = _REPO / "configs" / "hres_t0_toy_splice.toml"
 _TOY_ROLLOUT = _REPO / "configs" / "hres_t0_toy_rollout.toml"
+_SPREAD_SPLICE = _REPO / "configs" / "hres_t0_2022_spread_splice.toml"
+_SPREAD_ROLLOUT = _REPO / "configs" / "hres_t0_2022_spread_rollout.toml"
 
 
 def _toy_config(**overrides: object) -> EvalScheduleConfig:
@@ -70,3 +72,26 @@ def test_build_eval_schedule_rejects_06_utc_init() -> None:
 def test_eval_schedule_config_rejects_n_inits_zero() -> None:
     with pytest.raises(ValueError):
         _toy_config(n_inits=0)
+
+
+def test_spread_toml_covers_four_quarters() -> None:
+    config = load_eval_schedule_config(_SPREAD_SPLICE)
+    eval_schedule = build_eval_schedule(config)
+    inits = [pair.init_time for pair in eval_schedule.init_pairs]
+    by_quarter = pd.Series(inits).dt.quarter.value_counts().sort_index()
+    assert config.n_inits == 30
+    assert config.n_rollout_steps == 40
+    assert config.init_stride_hours == 300
+    assert list(by_quarter) == [8, 7, 7, 8]
+    assert {ts.hour for ts in inits} == {0, 12}
+    assert inits[0] == pd.Timestamp("2022-01-01T12")
+    assert inits[-1] == pd.Timestamp("2022-12-30T00")
+    assert eval_schedule.needed_times[0] == pd.Timestamp("2022-01-01T06")
+    assert eval_schedule.needed_times[-1] == pd.Timestamp("2023-01-09T00")
+    assert len(eval_schedule.needed_times) == 1260
+
+
+def test_spread_rollout_toml_matches_splice_needed_times() -> None:
+    splice_eval_schedule = build_eval_schedule(load_eval_schedule_config(_SPREAD_SPLICE))
+    rollout_eval_schedule = build_eval_schedule(load_eval_schedule_config(_SPREAD_ROLLOUT))
+    assert_times_available(rollout_eval_schedule.needed_times, splice_eval_schedule.needed_times)
