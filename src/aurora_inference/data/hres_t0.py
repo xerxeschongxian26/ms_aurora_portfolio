@@ -192,7 +192,7 @@ class HresT0Source:
         metadata = Metadata(
             lat=torch.tensor(
                 # (H,) is 1D, so axis=-2 is out of bounds here - unlike the (B,T,H,W)/
-                # (B,T,L,H,W)/(H,W) tensors above, H is axis 0, not second-to-last.
+                # (B,T,L,H,W) weather tensors above, H is axis 0, not second-to-last.
                 _flip_to_descending(_read_zarr_array(self.ZARR_DATA, "latitude"), axis=0),
                 dtype=torch.float32,
             ),
@@ -286,18 +286,23 @@ def _load_atmos_var(
 
 
 def _load_static_var(static_vars: dict[str, np.ndarray], key: str) -> torch.Tensor:
-    """Flip a cached ``(H, W)`` static variable's H axis to descending, cast to float32."""
-    array = _flip_to_descending(static_vars[key], axis=-2)  # (H, W) -> H is second-to-last
-    return torch.tensor(array, dtype=_WEATHER_DTYPE)
+    """Cast a cached ``(H, W)`` ERA5 static field to float32. No latitude flip.
+
+    ``aurora-0.25-static.pickle`` is already north-to-south (Aurora's required
+    descending lat). Microsoft's HRES-T0 demo leaves these unflipped for that
+    reason. Only WB2 HRES-T0 surf/atmos fields (and ``metadata.lat``) are flipped.
+    """
+    return torch.tensor(static_vars[key], dtype=_WEATHER_DTYPE)
 
 
 def _flip_to_descending(array: np.ndarray, *, axis: int) -> np.ndarray:
     """Reverse ``array`` along ``axis`` and return a contiguous copy.
 
     Converts HRES-T0's native ascending latitude into Aurora's required descending
-    order. Every tensor that shares this coordinate (surf/atmos/static data, and the
-    ``lat`` coordinate itself) must flip its *matching* axis - see
-    docs/batch-contract.md's lockstep flip rule.
+    order. Surf/atmos tensors that share this zarr coordinate, and the ``lat``
+    vector itself, must flip the matching axis together — see
+    docs/batch-contract.md's lockstep flip rule. Static fields are a different
+    source (ERA5 pickle) and must not go through this helper.
 
     The ``.copy()`` is required, not cosmetic: ``np.flip`` returns a negative-stride
     view, and ``torch.tensor()`` cannot consume negative strides.

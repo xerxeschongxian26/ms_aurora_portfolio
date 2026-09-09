@@ -72,9 +72,11 @@ CDS/ERA5 long names differ from Aurora short names (e.g. `2m_temperature` → `2
 | `lon` | Strictly **increasing** in **`[0, 360)`** — must **not** include 360 (ERA5 often uses `[-180, 180]`) |
 | dtypes | `float32` or `float64` for coords; weather fields must be `float32` |
 
-**Flip coords and fields together.** ERA5 often arrives with ascending latitude. Reversing only `metadata.lat` desynchronizes coordinates from data: `lat[i]` must still label spatial row `i` of every field. When correcting orientation, flip the **H** axis of all `surf_vars`, `atmos_vars`, and `static_vars` in lockstep with `lat` (and reorder the **W** axis the same way if you remap `lon`). Never mutate coordinates alone after the fact.
+**Flip coords and fields together.** WB2 HRES-T0 arrives with ascending latitude. Reversing only `metadata.lat` desynchronizes coordinates from data: `lat[i]` must still label spatial row `i` of every field. When correcting orientation, flip the **H** axis of `surf_vars` and `atmos_vars` in lockstep with `lat` (and reorder the **W** axis the same way if you remap `lon`). Never mutate coordinates alone after the fact.
 
-Stage 0 fixtures / `SyntheticSource` must **build** lat decreasing with fields already consistent — there is nothing to flip. The lockstep rule applies when constructing batches from real ERA5 (Stage 1 `ArcoEra5Source`).
+Do **not** flip `static_vars`. They come from Microsoft's ERA5 pickle (`aurora-0.25-static.pickle`), which is already north-to-south.
+
+Stage 0 fixtures / `SyntheticSource` must **build** lat decreasing with fields already consistent — there is nothing to flip. The lockstep rule applies when constructing batches from HRES-T0 (`HresT0Source`).
 
 ### 1-D lat / lon only (Stage 0)
 
