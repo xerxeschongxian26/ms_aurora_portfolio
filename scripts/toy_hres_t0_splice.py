@@ -3,9 +3,11 @@
 Does not run Aurora. The rollout path stops after asserting that the run's
 needed times are a subset of the local splice ``time`` index.
 
+Progress goes to stdout and ``outputs/<tag>/toy_hres_t0_splice.log``.
+
 From the repo root (needs network for GCS):
 
-    uv run --extra forecast python scripts/toy_hres_t0_splice.py
+    uv run --extra forecast python scripts/toy_hres_t0_splice.py --tag toy-splice
     uv run --extra forecast python scripts/toy_hres_t0_splice.py --skip-download
 """
 
@@ -25,14 +27,22 @@ from aurora_inference.evaluation.evaluation_schedule import (
     SpliceCoverageError,
     assert_times_available,
     build_eval_schedule,
+    campaign_n_inits,
     load_eval_schedule_config,
 )
-from aurora_inference.logging import format_elapsed
+from aurora_inference.logging import (
+    configure_run_logging,
+    format_elapsed,
+    normalize_run_tag,
+    run_artifact_dir,
+)
 
 _LOG = logging.getLogger(__name__)
 
 _DEFAULT_SPLICE = Path("configs/hres_t0_toy_splice.toml")
 _DEFAULT_ROLLOUT = Path("configs/hres_t0_toy_rollout.toml")
+_OUTPUT_DIR = Path("outputs")
+_LOG_NAME = "toy_hres_t0_splice.log"
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -53,6 +63,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--skip-download",
         action="store_true",
         help="skip GCS copy; only check rollout.toml against the existing splice",
+    )
+    parser.add_argument(
+        "--tag",
+        default=None,
+        help="optional run label; writes the progress log under outputs/<tag>/",
     )
     return parser.parse_args(argv)
 
@@ -95,7 +110,7 @@ def _check_rollout_coverage(rollout_config_path: Path) -> None:
     assert_times_available(eval_schedule.needed_times, available)
     _LOG.info(
         "rollout coverage ok: %s inits × %s steps (%s unique times) ⊆ %s (%s times)",
-        config.n_inits,
+        campaign_n_inits(config),
         config.n_rollout_steps,
         len(eval_schedule.needed_times),
         splice_path,
@@ -105,11 +120,17 @@ def _check_rollout_coverage(rollout_config_path: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        stream=sys.stdout,
-    )
+    try:
+        tag = normalize_run_tag(args.tag)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+
+    output_dir = run_artifact_dir(_OUTPUT_DIR, tag)
+    log_path = output_dir / _LOG_NAME
+    configure_run_logging(log_path, tag=tag)
+    _LOG.info("Splice HRES-T0; log file: %s", log_path)
+
     if not args.skip_download:
         _download_splice(args.splice_config)
     try:

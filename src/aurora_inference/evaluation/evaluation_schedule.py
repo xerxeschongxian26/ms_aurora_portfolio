@@ -26,6 +26,7 @@ __all__ = [
     "assert_times_available",
     "build_eval_schedule",
     "campaign_attr_payload",
+    "campaign_n_inits",
     "load_eval_schedule_config",
 ]
 
@@ -38,19 +39,26 @@ class SpliceCoverageError(Exception):
 
 
 class EvalScheduleConfig(BaseModel):
-    """Knobs shared by splice.toml (write) and rollout.toml (read / coverage)."""
+    """Knobs shared by splice.toml (write) and rollout.toml (read / coverage).
+
+    Two mutually exclusive ways to name inits:
+
+    * Grid: ``first_init``, ``n_inits``, ``init_stride_hours`` (toy / packed).
+    * Explicit: ``inits`` (year-spread that must skip known HRES-T0 holes).
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     splice_path: Path
-    first_init: datetime
-    n_inits: int = Field(ge=1)
-    init_stride_hours: int = Field(gt=0)
     n_rollout_steps: int = Field(ge=1)
     input_timestep_hours: int = Field(
         default=AURORA_PRETRAINED_SPEC.input_timestep_hours,
         ge=1,
     )
+    first_init: datetime | None = None
+    n_inits: int | None = Field(default=None, ge=1)
+    init_stride_hours: int | None = Field(default=None, gt=0)
+    inits: tuple[datetime, ...] | None = None
 
     @field_validator("splice_path")
     @classmethod
@@ -61,7 +69,29 @@ class EvalScheduleConfig(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _stride_is_multiple_of_timestep(self) -> EvalScheduleConfig:
+    def _one_init_schedule_mode(self) -> EvalScheduleConfig:
+        has_inits = self.inits is not None
+        grid_fields = (self.first_init, self.n_inits, self.init_stride_hours)
+        n_grid = sum(field is not None for field in grid_fields)
+        if has_inits and n_grid:
+            msg = "inits cannot be combined with first_init, n_inits, or init_stride_hours"
+            raise ValueError(msg)
+        if has_inits:
+            inits = self.inits
+            if inits is None or len(inits) == 0:
+                msg = "inits must contain at least one timestamp"
+                raise ValueError(msg)
+            if len(set(inits)) != len(inits):
+                msg = "inits must be unique"
+                raise ValueError(msg)
+            ordered = tuple(sorted(inits))
+            if ordered != inits:
+                return self.model_copy(update={"inits": ordered})
+            return self
+        if n_grid != 3:
+            msg = "provide inits, or all of first_init, n_inits, and init_stride_hours"
+            raise ValueError(msg)
+        assert self.init_stride_hours is not None
         if self.init_stride_hours % self.input_timestep_hours != 0:
             msg = (
                 f"init_stride_hours ({self.init_stride_hours}) must be a "
@@ -99,14 +129,32 @@ def load_eval_schedule_config(path: Path) -> EvalScheduleConfig:
     return EvalScheduleConfig.model_validate(payload)
 
 
-def build_eval_schedule(config: EvalScheduleConfig) -> EvalSchedule:
-    """Derive init pairs and the union of required 6-hourly HRES-T0 times."""
-    step = pd.Timedelta(hours=config.input_timestep_hours)
-    inits = pd.date_range(
+def _init_times(config: EvalScheduleConfig) -> pd.DatetimeIndex:
+    """Return campaign init timestamps from ``inits`` or the regular grid."""
+    if config.inits is not None:
+        return pd.DatetimeIndex(config.inits)
+    assert config.first_init is not None
+    assert config.n_inits is not None
+    assert config.init_stride_hours is not None
+    return pd.date_range(
         config.first_init,
         periods=config.n_inits,
         freq=pd.Timedelta(hours=config.init_stride_hours),
     )
+
+
+def campaign_n_inits(config: EvalScheduleConfig) -> int:
+    """Number of unique 00/12 eval inits named by this config."""
+    if config.inits is not None:
+        return len(config.inits)
+    assert config.n_inits is not None
+    return config.n_inits
+
+
+def build_eval_schedule(config: EvalScheduleConfig) -> EvalSchedule:
+    """Derive init pairs and the union of required 6-hourly HRES-T0 times."""
+    step = pd.Timedelta(hours=config.input_timestep_hours)
+    inits = _init_times(config)
     _assert_inits_are_eval_protocol(inits)
 
     pairs: list[InitPair] = []
@@ -163,13 +211,20 @@ def campaign_attr_payload(eval_schedule: EvalSchedule) -> dict[str, object]:
     """JSON-serializable identification blob for splice zarr group attrs."""
     cfg = eval_schedule.config
     times = eval_schedule.needed_times
+    splice_config: dict[str, object] = {
+        "n_inits": campaign_n_inits(cfg),
+        "n_rollout_steps": cfg.n_rollout_steps,
+    }
+    if cfg.inits is not None:
+        splice_config["inits"] = [stamp.isoformat() for stamp in cfg.inits]
+        splice_config["first_init"] = cfg.inits[0].isoformat()
+    else:
+        assert cfg.first_init is not None
+        assert cfg.init_stride_hours is not None
+        splice_config["first_init"] = cfg.first_init.isoformat()
+        splice_config["init_stride_hours"] = cfg.init_stride_hours
     return {
-        "aurora_inference.splice_config": {
-            "first_init": cfg.first_init.isoformat(),
-            "n_inits": cfg.n_inits,
-            "init_stride_hours": cfg.init_stride_hours,
-            "n_rollout_steps": cfg.n_rollout_steps,
-        },
+        "aurora_inference.splice_config": splice_config,
         "aurora_inference.time_start": times[0].isoformat(),
         "aurora_inference.time_end": times[-1].isoformat(),
         "aurora_inference.n_times": int(len(times)),

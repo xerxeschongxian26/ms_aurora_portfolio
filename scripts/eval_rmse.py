@@ -38,6 +38,7 @@ from aurora_inference.evaluation.evaluation_schedule import (
     SpliceCoverageError,
     assert_times_available,
     build_eval_schedule,
+    campaign_n_inits,
     load_eval_schedule_config,
 )
 from aurora_inference.evaluation.grids import as_naive_datetime, score_lead_rows
@@ -114,7 +115,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--rollout-config",
         type=Path,
         default=_DEFAULT_ROLLOUT,
-        help="TOML campaign (n_inits, n_rollout_steps, splice_path)",
+        help="TOML campaign (inits or first_init grid, n_rollout_steps, splice_path)",
     )
     parser.add_argument(
         "--tag",
@@ -138,7 +139,7 @@ def _load_campaign(rollout_config_path: Path) -> EvalSchedule:
     assert_times_available(schedule.needed_times, _read_zarr_time_index(group))
     _LOG.info(
         "campaign: %s inits × %s steps (%s unique times) ⊆ %s",
-        config.n_inits,
+        campaign_n_inits(config),
         config.n_rollout_steps,
         len(schedule.needed_times),
         config.splice_path,
@@ -289,7 +290,11 @@ def main(argv: list[str] | None = None) -> int:
     init_pairs = schedule.init_pairs
     if args.max_inits is not None:
         init_pairs = init_pairs[: args.max_inits]
-        _LOG.info("capping campaign at %s inits (of %s)", len(init_pairs), schedule.config.n_inits)
+        _LOG.info(
+            "capping campaign at %s inits (of %s)",
+            len(init_pairs),
+            len(schedule.init_pairs),
+        )
 
     rows = load_rmse_rows(output_dir)
     done_ids = {int(row["init_id"]) for row in rows}

@@ -1,11 +1,52 @@
 # Rollout campaign matching configs/hres_t0_2022_spread_splice.toml.
 # Coverage: this run's needed_times must be a SUBSET of the splice time index.
 #
-# 30 unique 00/12 UTC inits across 2022 (8/7/7/8 per quarter), 40 steps (10 d).
+# Same hole-aware `inits` as the splice TOML (see that file for the rule).
+# Catalogue: configs/hres_t0_outsample_holes.csv. Do not use a 300 h stride.
+#
+# Splice progress log (download, not this file):
+#   outputs/<tag>/toy_hres_t0_splice.log
+#
+# Written by scripts/eval_rmse.py --rollout-config this file --tag <tag>:
+#   outputs/<tag>/eval_rmse.log
+#   outputs/<tag>/rmse_by_init.csv
+#   outputs/<tag>/rmse_by_lead.csv
+# No forecast cubes or PNGs. Hugging Face weights stay in ~/.cache/huggingface
+# (or $HF_HOME) if the aurora-finetuned checkpoint is not already cached.
 
 splice_path = "data/splice_hres_t0_2022_spread.zarr"
 
-first_init = "2022-01-01T12:00:00"
-n_inits = 30
-init_stride_hours = 300
 n_rollout_steps = 40
+
+inits = [
+  "2022-01-01T12:00:00",
+  "2022-01-12T12:00:00",
+  "2022-01-19T12:00:00",
+  "2022-02-05T12:00:00",
+  "2022-03-24T00:00:00",
+  "2022-04-07T00:00:00",
+  "2022-04-20T12:00:00",
+  "2022-04-27T12:00:00",
+  "2022-05-04T12:00:00",
+  "2022-05-11T12:00:00",
+  "2022-05-18T12:00:00",
+  "2022-06-01T12:00:00",
+  "2022-06-08T12:00:00",
+  "2022-06-15T12:00:00",
+  "2022-07-18T12:00:00",
+  "2022-07-25T12:00:00",
+  "2022-08-23T00:00:00",
+  "2022-08-30T00:00:00",
+  "2022-09-06T00:00:00",
+  "2022-09-13T00:00:00",
+  "2022-09-20T00:00:00",
+  "2022-09-27T00:00:00",
+  "2022-10-04T00:00:00",
+  "2022-10-24T12:00:00",
+  "2022-11-04T12:00:00",
+  "2022-11-19T00:00:00",
+  "2022-12-08T00:00:00",
+  "2022-12-15T00:00:00",
+  "2022-12-22T00:00:00",
+  "2022-12-29T00:00:00",
+]

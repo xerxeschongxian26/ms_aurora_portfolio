@@ -1,19 +1,54 @@
-# 2022 year-spread splice (download / local store).
+# 2022 hole-aware year-spread splice (download / local store).
 # splice_path: where this campaign is written (zarr directory).
+# copy_hres_t0_splice rmtree's this path, then rewrites it.
 #
-# Subsample of the paper/WB2 protocol (every 00/12 UTC in 2022, leads to 10 d).
-# One regular grid the current scheduler can express: 30 inits, 12.5 d stride
-# (300 h). Alternates 00/12 UTC and lands 8/7/7/8 inits in Q1–Q4.
+# Inits are an explicit 00/12 UTC list, not a regular stride. A 300 h grid
+# cannot skip the z850 holes in configs/hres_t0_outsample_holes.csv.
 #
-# Windows do not overlap (stride 12.5 d > 10 d + 6 h), so needed_times is
-# 30 × 42 = 1260 stamps: 2022-01-01T06 → 2023-01-09T00 (last lead in the
-# HRES-T0 store tail). Expect on the order of ~300 GiB on disk.
+# Rule (frozen here): earliest remaining 2022 00/12 init whose {t−6h, t, and
+# 40 leads} contain no catalogue hole, at least 168 h after the previous pick.
+# Starts at 2022-01-01T12. n=30, quarters 5/9/8/8. Windows overlap, so
+# needed_times is 1022 stamps (not 30 × 42): 2022-01-01T06 → 2023-01-08T00.
 #
-# Inits: 2022-01-01T12 … 2022-12-30T00.
+# Keep this `inits` list identical to configs/hres_t0_2022_spread_rollout.toml.
+#
+# Written by scripts/toy_hres_t0_splice.py --tag <tag>:
+#   data/splice_hres_t0_2022_spread.zarr/   (WB2-layout zarr; rmtree then rewrite)
+#   outputs/<tag>/toy_hres_t0_splice.log   (same INFO lines as stdout)
 
 splice_path = "data/splice_hres_t0_2022_spread.zarr"
 
-first_init = "2022-01-01T12:00:00"
-n_inits = 30
-init_stride_hours = 300
 n_rollout_steps = 40
+
+inits = [
+  "2022-01-01T12:00:00",
+  "2022-01-12T12:00:00",
+  "2022-01-19T12:00:00",
+  "2022-02-05T12:00:00",
+  "2022-03-24T00:00:00",
+  "2022-04-07T00:00:00",
+  "2022-04-20T12:00:00",
+  "2022-04-27T12:00:00",
+  "2022-05-04T12:00:00",
+  "2022-05-11T12:00:00",
+  "2022-05-18T12:00:00",
+  "2022-06-01T12:00:00",
+  "2022-06-08T12:00:00",
+  "2022-06-15T12:00:00",
+  "2022-07-18T12:00:00",
+  "2022-07-25T12:00:00",
+  "2022-08-23T00:00:00",
+  "2022-08-30T00:00:00",
+  "2022-09-06T00:00:00",
+  "2022-09-13T00:00:00",
+  "2022-09-20T00:00:00",
+  "2022-09-27T00:00:00",
+  "2022-10-04T00:00:00",
+  "2022-10-24T12:00:00",
+  "2022-11-04T12:00:00",
+  "2022-11-19T00:00:00",
+  "2022-12-08T00:00:00",
+  "2022-12-15T00:00:00",
+  "2022-12-22T00:00:00",
+  "2022-12-29T00:00:00",
+]

@@ -7,6 +7,7 @@ from aurora_inference.evaluation.evaluation_schedule import (
     SpliceCoverageError,
     assert_times_available,
     build_eval_schedule,
+    campaign_n_inits,
     load_eval_schedule_config,
 )
 from aurora_inference.evaluation.metrics import MSE
@@ -20,6 +21,7 @@ __all__ = [
     "SpliceCoverageError",
     "assert_times_available",
     "build_eval_schedule",
+    "campaign_n_inits",
     "load_eval_schedule_config",
     "load_rmse_rows",
     "write_rmse_tables",
