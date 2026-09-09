@@ -10,10 +10,23 @@ from pathlib import Path
 
 __all__ = [
     "configure_run_logging",
+    "format_elapsed",
     "normalize_run_tag",
     "peak_rss_bytes",
     "run_artifact_dir",
 ]
+
+
+def format_elapsed(seconds: float) -> str:
+    """Format a duration as ``12s``, ``1m 15s``, or ``1h 2m 3s``."""
+    total = max(0, int(seconds))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours > 0:
+        return f"{hours}h {minutes}m {secs}s"
+    if minutes > 0:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
 
 
 def normalize_run_tag(tag: str | None) -> str | None:

@@ -33,6 +33,7 @@ from aurora_inference.data.hres_t0 import (
     open_connection_to_gcs,
     open_local_zarr,
 )
+from aurora_inference.logging import format_elapsed
 
 __all__ = [
     "CATALOGUE_FIELDS",
@@ -203,17 +204,6 @@ def format_shape(shape: tuple[int, ...] | None) -> str:
     if shape is None:
         return ""
     return "x".join(str(dim) for dim in shape)
-
-
-def format_elapsed(seconds: float) -> str:
-    total = max(0, int(seconds))
-    hours, rem = divmod(total, 3600)
-    minutes, secs = divmod(rem, 60)
-    if hours > 0:
-        return f"{hours}h {minutes}m {secs}s"
-    if minutes > 0:
-        return f"{minutes}m {secs}s"
-    return f"{secs}s"
 
 
 def format_hole_line(row: HoleRow) -> str:

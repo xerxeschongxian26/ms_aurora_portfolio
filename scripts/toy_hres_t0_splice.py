@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import time
 from pathlib import Path
 
 import zarr
@@ -26,6 +27,7 @@ from aurora_inference.evaluation.evaluation_schedule import (
     build_eval_schedule,
     load_eval_schedule_config,
 )
+from aurora_inference.logging import format_elapsed
 
 _LOG = logging.getLogger(__name__)
 
@@ -65,7 +67,12 @@ def _download_splice(splice_config_path: Path) -> Path:
         eval_schedule.needed_times[-1],
         config.splice_path,
     )
+    download_t0 = time.perf_counter()
     out_path = copy_hres_t0_splice(eval_schedule)
+    _LOG.info(
+        "download wall time: %s (includes GCS open and dest reset)",
+        format_elapsed(time.perf_counter() - download_t0),
+    )
     _LOG.info("wrote splice %s", out_path)
     return out_path
 
