@@ -6,11 +6,13 @@
 # Packed 00/12 inits SHARE those 6-hourly times (overlapping windows).
 # needed_times is the UNION, so 2 inits × 3 steps is 7 unique times,
 # not 2 × 5.
-# Toy window: 2022-01-01T06 → 2022-01-02T18.
+#
+# January packed toy: 27 inits × 40 steps, starting after the 2022-01-01
+# z850 hole (skip 2022-01-01T12 init). Window 2022-01-12T06 → 2022-02-04T12.
 
-splice_path = "data/splice_hres_t0_toy.zarr"
+splice_path = "data/splice_hres_t0_toy_jan_clean.zarr"
 
-first_init = "2022-01-01T12:00:00"
-n_inits = 2
+first_init = "2022-01-12T12:00:00"
+n_inits = 27
 init_stride_hours = 12
-n_rollout_steps = 3
+n_rollout_steps = 40

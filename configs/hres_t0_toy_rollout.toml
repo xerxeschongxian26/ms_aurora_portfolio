@@ -4,12 +4,11 @@
 # Coverage: this run's needed_times must be a SUBSET of the splice time
 # index. Extra times on disk are OK; a missing t-6h or lead raises.
 #
-# This toy file matches splice.toml (2 inits × 3 steps) so the check passes
-# after a successful download.
+# Matches splice.toml: 27 packed inits × 40 steps, hole-clean from 2022-01-12.
 
-splice_path = "data/splice_hres_t0_toy.zarr"
+splice_path = "data/splice_hres_t0_toy_jan_clean.zarr"
 
-first_init = "2022-01-01T12:00:00"
-n_inits = 2
+first_init = "2022-01-12T12:00:00"
+n_inits = 27
 init_stride_hours = 12
-n_rollout_steps = 3
+n_rollout_steps = 40

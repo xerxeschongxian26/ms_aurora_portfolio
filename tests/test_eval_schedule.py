@@ -34,19 +34,29 @@ def _toy_config(**overrides: object) -> EvalScheduleConfig:
     return EvalScheduleConfig.model_validate(payload)
 
 
-def test_toy_splice_toml_has_seven_overlapping_times() -> None:
+def test_toy_splice_toml_jan_clean_packed_window() -> None:
     config = load_eval_schedule_config(_TOY_SPLICE)
     eval_schedule = build_eval_schedule(config)
-    assert config.n_inits == 2
-    assert config.n_rollout_steps == 3
-    assert len(eval_schedule.init_pairs) == 2
-    assert len(eval_schedule.needed_times) == 7
-    assert eval_schedule.needed_times[0] == pd.Timestamp("2022-01-01T06")
-    assert eval_schedule.needed_times[-1] == pd.Timestamp("2022-01-02T18")
-    assert eval_schedule.init_pairs[0].init_time == pd.Timestamp("2022-01-01T12")
-    assert eval_schedule.init_pairs[1].init_time == pd.Timestamp("2022-01-02T00")
-    assert eval_schedule.init_pairs[0].last_rollout == pd.Timestamp("2022-01-02T06")
-    assert eval_schedule.init_pairs[1].last_rollout == pd.Timestamp("2022-01-02T18")
+    assert config.n_inits == 27
+    assert config.n_rollout_steps == 40
+    assert len(eval_schedule.init_pairs) == 27
+    assert len(eval_schedule.needed_times) == 94
+    assert eval_schedule.needed_times[0] == pd.Timestamp("2022-01-12T06")
+    assert eval_schedule.needed_times[-1] == pd.Timestamp("2022-02-04T12")
+    assert eval_schedule.init_pairs[0].init_time == pd.Timestamp("2022-01-12T12")
+    assert eval_schedule.init_pairs[-1].init_time == pd.Timestamp("2022-01-25T12")
+    assert eval_schedule.init_pairs[0].last_rollout == pd.Timestamp("2022-01-22T12")
+    assert eval_schedule.init_pairs[-1].last_rollout == pd.Timestamp("2022-02-04T12")
+
+
+def test_toy_inits_avoid_outsample_holes() -> None:
+    holes = {pd.Timestamp(row["time"]) for row in csv.DictReader(_OUTSAMPLE_HOLES.open())}
+    eval_schedule = build_eval_schedule(load_eval_schedule_config(_TOY_SPLICE))
+    step = pd.Timedelta(hours=6)
+    for pair in eval_schedule.init_pairs:
+        window = pd.date_range(pair.prev_time, pair.last_rollout, freq=step)
+        hit = holes.intersection(window)
+        assert not hit, f"{pair.init_time} window hits {sorted(hit)}"
 
 
 def test_toy_rollout_toml_matches_splice_needed_times() -> None:
