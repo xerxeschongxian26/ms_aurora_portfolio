@@ -111,6 +111,26 @@ Allocated tensors staying the same size does not mean the allocator stays happy.
 
 If `run_rollout` iterates the official generator and does `pred.to("cpu")` each step (new `Batch`; do not mutate the yielded tensors in place), resident stays near s=1 and the linear time estimate is solid. Do not change `aurora.rollout`; it still needs the GPU `pred` for the next-step `torch.cat`. If all 40 preds stay on CUDA, treat 4.1 minutes as the floor and the last steps as the risk.
 
+## Disk: storing 30 × 40 forecast fields
+
+VRAM leftover (~286 MiB per extra step) is the size of one T=1 output `Batch` kept on CUDA, including static vars. A cube archive does not store static orography 1,200 times. Weather-only payload is ~273 MiB / 0.267 GiB per lead on `721×1440` float32 (4 surf + 5 atmos × 13 levels). That is the unit for WP5b.
+
+30 inits × 40 leads = 1,200 snapshots. NFS rate from `gpu-playbook.md`: **$0.20/GiB-month**, billed while the filesystem exists.
+
+Headline set (`notebooks/_scratch/stage2_eval_rmse.ipynb`): `2t`, `10u`, `msl`, `u500`, `z500`, `t500`, `t850`, `q500` — eight native 2-D slices, not the WB2 Table 3 eight (no precip, no `10v`).
+
+| What you persist | Uncompressed | Lossless zarr (≈2–3×, typical, not measured) | NFS at $0.20/GiB-month |
+|---|---:|---:|---:|
+| Full weather fields | **~320 GiB** | ~110–160 GiB | **~$64** / ~$22–32 |
+| 8 headline slices | **~37 GiB** | ~12–19 GiB | **~$7** / ~$2.50–4 |
+| z500 + t850 only | **~9 GiB** | ~3–5 GiB | **~$2** / ~$1 |
+
+Exact headline payload: `8 × 721 × 1440 × 4 B × 1200` = 37.1 GiB. Full fields scale from the 0.267 GiB/lead weather unit. Compressed sizes are a Blosc+shuffle ballpark for float32 weather, not a measurement on these cubes. Do not quantize an FP reference (adds error on top of the measurement floor).
+
+Do not keep 30 × 40 on the GPU. One init’s 40-step CUDA list is already ~17 GiB resident / ~37 GiB allocated. Write each lead (or init) and drop it; `offload_to_cpu=True` keeps VRAM near the 1-step peak. Host RAM for one init’s 40 steps is ~11 GiB if you hold the list.
+
+`10u` without `10v` cannot reconstruct 10 m wind speed. Delete the NFS volume when the phase ends; terminate does not stop filesystem billing.
+
 ## Takeaway
 
 One `forward` sets the VRAM peak. Extra **steps** cost wall time. Extra **B** costs VRAM (~23 GiB allocated per added batch on this grid). A100 40 GB is a B=1 card for full 0.25° `aurora-finetuned`. H100 80 GB holds B=2 and B=3; B=4 does not. For many inits on 40 GB, run sequential B=1 (or one init per GPU), do not stack `B`. For a 40-step rollout on this SKU, offload each pred to CPU or expect ~37 GiB allocated plus allocator pressure.
