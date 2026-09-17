@@ -23,6 +23,7 @@ from aurora_inference.runlog import (
     load_run_log,
     measure_cuda_elapsed_ms,
     read_hygiene_flags,
+    reset_vram_peak,
     snapshot_memory,
     write_run_log,
 )
@@ -117,6 +118,7 @@ def test_collect_env_records_pin_and_torch_version() -> None:
 
 
 def test_snapshot_memory_cpu_has_no_vram() -> None:
+    reset_vram_peak("cpu")
     memory = snapshot_memory("cpu")
     assert memory.peak_rss_bytes > 0
     assert memory.max_memory_allocated is None
