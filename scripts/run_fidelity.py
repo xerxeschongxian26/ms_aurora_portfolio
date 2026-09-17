@@ -1,12 +1,12 @@
 """Q2 fidelity campaign: named variant vs a baseline forecast, one rollout TOML.
 
-WP4 first draft — CPU dry-run only. Scores ``fp32-baseline`` against itself on
+WP4 CPU dry-run: scores ``fp32-baseline`` against itself on
 ``AuroraSmallPretrained`` (synthetic 32×64 batch, 1 init, 2 steps). That checks
 the seam: registry lookup → rollout → ``batch_to_dataset`` → RMSE helpers →
-tables + a stub run JSON. RMSE(variant, baseline) must be ≈ 0.
+tables + ``runlog.py`` JSON. RMSE(variant, baseline) must be ≈ 0.
 
 This is plumbing, not skill. Do not quote these RMSEs. The GPU path (persisted
-baseline forecasts, screen/confirm TOML, ``runlog.py``) is not in this draft.
+baseline forecasts, screen/confirm TOML) is not in this draft.
 
 Example::
 
@@ -17,7 +17,6 @@ Example::
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
 import time
@@ -39,6 +38,15 @@ from aurora_inference.evaluation.variants import VARIANTS, VariantConfig
 from aurora_inference.inference.forward import run_rollout
 from aurora_inference.logging import configure_run_logging, normalize_run_tag, run_artifact_dir
 from aurora_inference.model.loader import load_model
+from aurora_inference.runlog import (
+    RunIdentity,
+    RunLog,
+    TimingRecord,
+    checksums_for_pred,
+    collect_env,
+    snapshot_memory,
+    write_run_log,
+)
 
 _LOG = logging.getLogger(__name__)
 
@@ -56,10 +64,6 @@ _NO_SKILL_BANNER = (
     "=== NO FORECAST SKILL === CPU dry-run uses AuroraSmallPretrained + "
     "SyntheticSource. RMSE≈0 only proves the Q2 wiring, not forecast quality."
 )
-
-# TODO(stage-2): replace this stub with aurora_inference.runlog — blocked on WP4
-# runlog.py (CUDA Event timing, torch.backends.* readback, reserved VRAM).
-_RUNLOG_STUB_NOTE = "stub JSON; replace with aurora_inference.runlog once runlog.py lands"
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -180,26 +184,6 @@ def _score_variant_vs_baseline(
     return rows
 
 
-def _checksums_for_pred(pred: Batch) -> dict[str, float]:
-    """Cheap z500 / t850 witnesses without storing tensors."""
-    levels = [int(level) for level in pred.metadata.atmos_levels]
-    i500 = levels.index(500)
-    i850 = levels.index(850)
-    z500 = pred.atmos_vars["z"][0, 0, i500]
-    t850 = pred.atmos_vars["t"][0, 0, i850]
-    return {
-        "z500_sum": float(z500.sum()),
-        "z500_abs_max": float(z500.abs().max()),
-        "t850_sum": float(t850.sum()),
-        "t850_abs_max": float(t850.abs().max()),
-    }
-
-
-def _write_stub_run_json(path: Path, payload: dict[str, Any]) -> None:
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    _LOG.info("wrote stub run JSON %s", path)
-
-
 def _max_rmse(rows: list[dict[str, Any]]) -> float:
     return max(float(row["rmse"]) for row in rows)
 
@@ -236,7 +220,7 @@ def _run_cpu_dry_run(*, variant: VariantConfig, output_dir: Path) -> int:
         _LOG.info("%s rollout wall time: %.2fs for %d steps", label, elapsed_s, _DRY_RUN_STEPS)
         return preds, elapsed_s
 
-    baseline_preds, baseline_s = _rollout("baseline")
+    baseline_preds, _ = _rollout("baseline")
     variant_preds, variant_s = _rollout("variant")
 
     rows = _score_variant_vs_baseline(
@@ -256,31 +240,39 @@ def _run_cpu_dry_run(*, variant: VariantConfig, output_dir: Path) -> int:
     )
 
     checksums = [
-        {"step": step_index, **_checksums_for_pred(pred)}
+        checksums_for_pred(pred, step=step_index)
         for step_index, pred in enumerate(variant_preds, start=1)
     ]
-    _write_stub_run_json(
-        output_dir / "run_init-0.json",
-        {
-            "note": _RUNLOG_STUB_NOTE,
-            "cpu_dry_run": True,
-            "variant": variant.name,
-            "init_id": 0,
-            "init_time": _DRY_RUN_INIT.isoformat(),
-            "sku": "cpu",
-            "batch_size": 1,
-            "n_steps": _DRY_RUN_STEPS,
-            "seed": _DRY_RUN_SEED,
-            "model_name": _DRY_RUN_MODEL,
-            "timing": {
-                "model_load_s": load_s,
-                "baseline_rollout_s": baseline_s,
-                "variant_rollout_s": variant_s,
-            },
-            "checksums": checksums,
-            "max_rmse_variant_vs_baseline": max_rmse,
-        },
+    run_path = output_dir / "run_init-0.json"
+    write_run_log(
+        run_path,
+        RunLog(
+            env=collect_env(),
+            run=RunIdentity(
+                variant=variant.name,
+                init_id=0,
+                init_time=_DRY_RUN_INIT.isoformat(),
+                sku="cpu",
+                device=_DRY_RUN_DEVICE,
+                batch_size=1,
+                n_steps=_DRY_RUN_STEPS,
+                seed=_DRY_RUN_SEED,
+                model_name=_DRY_RUN_MODEL,
+                offload_to_cpu=False,
+                cpu_dry_run=True,
+            ),
+            timing=TimingRecord(
+                model_load_s=load_s,
+                full_rollout_wall_s=variant_s,
+                full_rollout_ms=None,
+                per_step_ms=[None] * _DRY_RUN_STEPS,
+            ),
+            memory=snapshot_memory(_DRY_RUN_DEVICE),
+            checksums=checksums,
+            max_rmse_variant_vs_baseline=max_rmse,
+        ),
     )
+    _LOG.info("wrote run JSON %s", run_path)
     _LOG.warning(_NO_SKILL_BANNER)
 
     if not np.isfinite(max_rmse) or max_rmse > _RMSE_NEAR_ZERO:
@@ -310,7 +302,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.cpu_dry_run:
         print(
             "GPU fidelity campaign is not in this draft "
-            "(needs runlog.py and persisted baseline forecasts). "
+            "(needs persisted baseline forecasts from WP5b). "
             "Pass --cpu-dry-run for the WP4 wiring check.",
             file=sys.stderr,
         )
