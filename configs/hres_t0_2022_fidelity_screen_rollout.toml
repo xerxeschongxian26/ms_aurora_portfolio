@@ -1,0 +1,32 @@
+# Q2 fidelity-screen (n=6). Stage 3 first pass on every variant.
+# Confirm-tier reuses configs/hres_t0_2022_spread_rollout.toml (n=30).
+#
+# Same splice as the year-spread campaign. Coverage: this run's
+# needed_times must be a SUBSET of the splice time index (inherited:
+# every init here is already in the 30).
+#
+# Composition (locked in tests/test_eval_schedule.py):
+#   1 per named month (Jan / Apr / Jul / Oct) plus two high-gradient
+#   cases. All six are a strict subset of the hole-aware 30.
+#
+# High-gradient extras:
+#   2022-07-18T12 — European heat-dome / blocking high (Wales record
+#     18 Jul; UK 40.3°C at Coningsby 19 Jul). Met Office 2022.
+#   2022-09-27T00 — Hurricane Ian; Cuba landfall ~0830 UTC 27 Sep,
+#     Florida landfall 28 Sep (NHC TCR AL092022).
+#
+# Catalogue: configs/hres_t0_outsample_holes.csv. Do not hardcode this
+# list in Python.
+
+splice_path = "data/splice_hres_t0_2022_spread.zarr"
+
+n_rollout_steps = 40
+
+inits = [
+  "2022-01-01T12:00:00",  # Jan seasonal
+  "2022-04-07T00:00:00",  # Apr seasonal
+  "2022-07-18T12:00:00",  # blocking (European heat-dome)
+  "2022-07-25T12:00:00",  # Jul seasonal
+  "2022-09-27T00:00:00",  # cyclone (Hurricane Ian)
+  "2022-10-24T12:00:00",  # Oct seasonal
+]

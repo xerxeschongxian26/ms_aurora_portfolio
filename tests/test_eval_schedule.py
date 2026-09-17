@@ -19,7 +19,10 @@ _TOY_SPLICE = _REPO / "configs" / "hres_t0_toy_splice.toml"
 _TOY_ROLLOUT = _REPO / "configs" / "hres_t0_toy_rollout.toml"
 _SPREAD_SPLICE = _REPO / "configs" / "hres_t0_2022_spread_splice.toml"
 _SPREAD_ROLLOUT = _REPO / "configs" / "hres_t0_2022_spread_rollout.toml"
+_FIDELITY_SCREEN_ROLLOUT = _REPO / "configs" / "hres_t0_2022_fidelity_screen_rollout.toml"
 _OUTSAMPLE_HOLES = _REPO / "configs" / "hres_t0_outsample_holes.csv"
+_SCREEN_CYCLONE = datetime(2022, 9, 27, 0, 0)
+_SCREEN_BLOCKING = datetime(2022, 7, 18, 12, 0)
 
 
 def _toy_config(**overrides: object) -> EvalScheduleConfig:
@@ -120,6 +123,24 @@ def test_spread_rollout_toml_matches_splice_needed_times() -> None:
     rollout_eval_schedule = build_eval_schedule(load_eval_schedule_config(_SPREAD_ROLLOUT))
     assert splice_eval_schedule.config.inits == rollout_eval_schedule.config.inits
     assert_times_available(rollout_eval_schedule.needed_times, splice_eval_schedule.needed_times)
+
+
+def test_fidelity_screen_toml_is_guarded_subset_of_spread() -> None:
+    spread = load_eval_schedule_config(_SPREAD_ROLLOUT)
+    screen = load_eval_schedule_config(_FIDELITY_SCREEN_ROLLOUT)
+    assert spread.inits is not None
+    assert screen.inits is not None
+    assert campaign_n_inits(screen) == 6
+    assert screen.n_rollout_steps == 40
+    assert screen.splice_path == spread.splice_path
+    assert screen.init_stride_hours is None
+    assert set(screen.inits) < set(spread.inits)
+    assert {1, 4, 7, 10} <= {ts.month for ts in screen.inits}
+    assert _SCREEN_CYCLONE in screen.inits
+    assert _SCREEN_BLOCKING in screen.inits
+    screen_eval_schedule = build_eval_schedule(screen)
+    spread_eval_schedule = build_eval_schedule(spread)
+    assert_times_available(screen_eval_schedule.needed_times, spread_eval_schedule.needed_times)
 
 
 def test_eval_schedule_config_rejects_mixing_inits_and_grid() -> None:
