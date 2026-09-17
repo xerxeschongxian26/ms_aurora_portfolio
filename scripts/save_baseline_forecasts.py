@@ -32,6 +32,7 @@ import json
 import logging
 import sys
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -281,18 +282,84 @@ def _profiler_activities(device: str) -> list[torch.profiler.ProfilerActivity]:
     return activities
 
 
-def _one_forward(model: Aurora, batch: Batch) -> list[Batch]:
-    return run_rollout(model, batch, steps=1, offload_to_cpu=True)
+def _log_inference_step(
+    label: str,
+    step_index: int,
+    steps: int,
+    *,
+    step_hours: int,
+    step_s: float,
+    rollout_s: float,
+) -> None:
+    _LOG.info(
+        "%s inference step=%s/%s lead=%sh step_wall=%.2fs rollout_wall=%.2fs",
+        label,
+        step_index,
+        steps,
+        step_index * step_hours,
+        step_s,
+        rollout_s,
+    )
 
 
-def _warmup(model: Aurora, batch: Batch) -> None:
+def _inference_step_logger(
+    label: str, steps: int, *, step_hours: int
+) -> Callable[[int, Batch], None]:
+    started = time.perf_counter()
+    last = started
+
+    def on_step(step_index: int, _pred: Batch) -> None:
+        nonlocal last
+        now = time.perf_counter()
+        step_s = now - last
+        last = now
+        _log_inference_step(
+            label,
+            step_index,
+            steps,
+            step_hours=step_hours,
+            step_s=step_s,
+            rollout_s=now - started,
+        )
+
+    return on_step
+
+
+def _one_forward(
+    model: Aurora,
+    batch: Batch,
+    *,
+    label: str,
+    step_hours: int,
+) -> list[Batch]:
+    return run_rollout(
+        model,
+        batch,
+        steps=1,
+        offload_to_cpu=True,
+        on_step=_inference_step_logger(label, 1, step_hours=step_hours),
+    )
+
+
+def _warmup(model: Aurora, batch: Batch, *, step_hours: int) -> None:
     for index in range(_WARMUP_FORWARDS):
-        preds = _one_forward(model, batch)
-        _LOG.info("warm-up forward %s/%s discarded", index + 1, _WARMUP_FORWARDS)
+        preds = _one_forward(
+            model,
+            batch,
+            label=f"warm-up {index + 1}/{_WARMUP_FORWARDS}",
+            step_hours=step_hours,
+        )
         del preds
 
 
-def _profile_one_forward(model: Aurora, batch: Batch, *, device: str, trace_path: Path) -> None:
+def _profile_one_forward(
+    model: Aurora,
+    batch: Batch,
+    *,
+    device: str,
+    trace_path: Path,
+    step_hours: int,
+) -> None:
     """One step only — do not profile the rollout. Trace is gitignored under outputs/."""
     trace_path.parent.mkdir(parents=True, exist_ok=True)
     with torch.profiler.profile(
@@ -300,7 +367,12 @@ def _profile_one_forward(model: Aurora, batch: Batch, *, device: str, trace_path
         record_shapes=True,
         acc_events=True,
     ) as prof:
-        preds = _one_forward(model, batch)
+        preds = _one_forward(
+            model,
+            batch,
+            label="profiler",
+            step_hours=step_hours,
+        )
     del preds
     prof.export_chrome_trace(str(trace_path))
     _LOG.info("wrote profiler trace %s", trace_path)
@@ -312,10 +384,18 @@ def _timed_rollout(
     steps: int,
     *,
     device: str,
+    label: str,
+    step_hours: int,
 ) -> tuple[list[Batch], float, float | None]:
     started = time.perf_counter()
     preds, cuda_ms = measure_cuda_elapsed_ms(
-        lambda: run_rollout(model, batch, steps, offload_to_cpu=True),
+        lambda: run_rollout(
+            model,
+            batch,
+            steps,
+            offload_to_cpu=True,
+            on_step=_inference_step_logger(label, steps, step_hours=step_hours),
+        ),
         device=device,
     )
     return preds, time.perf_counter() - started, cuda_ms
@@ -349,10 +429,18 @@ def _persist_rollout(
     *,
     device: str,
     init_id: int,
+    step_hours: int,
 ) -> tuple[list[Batch], float, float | None, MemoryRecord]:
     """Reset CUDA peak, roll out, snapshot once (OOM check for 40-step persist)."""
     reset_vram_peak(device)
-    preds, wall_s, cuda_ms = _timed_rollout(model, batch, steps, device=device)
+    preds, wall_s, cuda_ms = _timed_rollout(
+        model,
+        batch,
+        steps,
+        device=device,
+        label=f"init_id={init_id} persist",
+        step_hours=step_hours,
+    )
     memory = snapshot_memory(device)
     _log_after_persist_rollout(memory, init_id=init_id)
     return preds, wall_s, cuda_ms, memory
@@ -373,8 +461,22 @@ def _measurement_floor(
     variables = _persist_variables(spec, fields)
     step_hours = spec.input_timestep_hours
     leads = _leads_for_floor(n_steps, step_hours)
-    first, first_s, _ = _timed_rollout(model, batch, n_steps, device=device)
-    second, second_s, _ = _timed_rollout(model, batch, n_steps, device=device)
+    first, first_s, _ = _timed_rollout(
+        model,
+        batch,
+        n_steps,
+        device=device,
+        label="floor rollout 1/2",
+        step_hours=step_hours,
+    )
+    second, second_s, _ = _timed_rollout(
+        model,
+        batch,
+        n_steps,
+        device=device,
+        label="floor rollout 2/2",
+        step_hours=step_hours,
+    )
     rows: list[dict[str, Any]] = []
     for lead_hours in leads:
         step_index = lead_hours // step_hours
@@ -643,12 +745,13 @@ def _run_cpu_dry_run(*, variant: VariantConfig, output_dir: Path, fields: Persis
     )
     _LOG.info("wrote session env %s", session_path)
 
-    _warmup(model, batch)
+    _warmup(model, batch, step_hours=spec.input_timestep_hours)
     _profile_one_forward(
         model,
         batch,
         device=_DRY_RUN_DEVICE,
         trace_path=output_dir / "trace.json",
+        step_hours=spec.input_timestep_hours,
     )
     floor = _measurement_floor(
         model,
@@ -680,6 +783,7 @@ def _run_cpu_dry_run(*, variant: VariantConfig, output_dir: Path, fields: Persis
         _DRY_RUN_STEPS,
         device=_DRY_RUN_DEVICE,
         init_id=0,
+        step_hours=spec.input_timestep_hours,
     )
     init_dir = init_forecast_dir(output_dir, 0)
     _persist_preds(preds, init_dir=init_dir, spec=spec, fields=fields)
@@ -774,12 +878,13 @@ def _run_gpu_campaign(
     validate_batch(batch, spec)
     batch = batch.to(_GPU_DEVICE)
 
-    _warmup(model, batch)
+    _warmup(model, batch, step_hours=spec.input_timestep_hours)
     _profile_one_forward(
         model,
         batch,
         device=_GPU_DEVICE,
         trace_path=output_dir / "trace.json",
+        step_hours=spec.input_timestep_hours,
     )
     floor = _measurement_floor(
         model,
@@ -864,6 +969,7 @@ def _persist_gpu_init(
         init_pair.n_rollout_steps,
         device=_GPU_DEVICE,
         init_id=init_pair.init_id,
+        step_hours=spec.input_timestep_hours,
     )
     del batch
     init_dir = init_forecast_dir(output_dir, init_pair.init_id)
