@@ -7,21 +7,38 @@ loads these grids for RMSE(variant, baseline). Not a WB2-layout store.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
+import numpy as np
+import pandas as pd
 import xarray as xr
+
+from aurora_inference.evaluation.fidelity import compute_rmse_score_variant_vs_baseline
+from aurora_inference.evaluation.grids import (
+    align_truth_to_forecast,
+    as_naive_datetime,
+    rmse_rows_from_mse,
+)
+from aurora_inference.evaluation.metrics import MSE
+from aurora_inference.evaluation.tables import load_rmse_rows
 
 __all__ = [
     "FIELDS_FULL",
     "FIELDS_HEADLINE",
     "FLOOR_LEAD_HOURS",
+    "HEADLINE_KEYS",
     "HEADLINE_SLICES",
     "HeadlineSlice",
     "PersistFields",
+    "headline_aurora_dataset",
     "init_forecast_dir",
     "lead_zarr_path",
+    "persist_init_ids_by_time",
     "read_lead_forecast",
+    "score_headline_vs_analysis_rows",
+    "score_headline_vs_baseline_rows",
     "select_persist_fields",
     "write_lead_forecast",
 ]
@@ -52,6 +69,7 @@ HEADLINE_SLICES: tuple[HeadlineSlice, ...] = (
     HeadlineSlice(key="t850", aurora_name="t", level=850),
     HeadlineSlice(key="q500", aurora_name="q", level=500),
 )
+HEADLINE_KEYS: tuple[str, ...] = tuple(slice_.key for slice_ in HEADLINE_SLICES)
 
 
 def init_forecast_dir(output_dir: Path, init_id: int) -> Path:
@@ -101,6 +119,110 @@ def read_lead_forecast(path: Path) -> xr.Dataset:
         return cast(xr.Dataset, dataset.load())
     finally:
         dataset.close()
+
+
+def persist_init_ids_by_time(campaign_dir: Path) -> dict[str, int]:
+    """Map ``init_time`` ISO strings to persist ``init_id`` from ``rmse_by_init.csv``.
+
+    Screen TOML re-numbers inits 1..6. The n=30 archive keeps the spread
+    ``init_id``. Pair on valid init time, not the campaign-local index.
+    """
+    rows = load_rmse_rows(campaign_dir)
+    if not rows:
+        msg = f"no rmse_by_init.csv rows under {campaign_dir}"
+        raise FileNotFoundError(msg)
+    mapping: dict[str, int] = {}
+    for row in rows:
+        key = as_naive_datetime(pd.Timestamp(row["init_time"])).isoformat()
+        init_id = int(row["init_id"])
+        previous = mapping.get(key)
+        if previous is not None and previous != init_id:
+            msg = f"conflicting persist init_id for {key}: {previous} vs {init_id}"
+            raise ValueError(msg)
+        mapping[key] = init_id
+    return mapping
+
+
+def score_headline_vs_baseline_rows(
+    variant: xr.Dataset,
+    baseline: xr.Dataset,
+    *,
+    init_id: int,
+    init_time: datetime,
+    lead_hours: int,
+) -> list[dict[str, Any]]:
+    """Per-lead RMSE(variant, baseline) on the eight Q1 headline keys."""
+    rmse = compute_rmse_score_variant_vs_baseline(
+        baseline=baseline,
+        variant=variant,
+        variables=list(HEADLINE_KEYS),
+    )
+    return _rmse_dataset_to_rows(rmse, init_id=init_id, init_time=init_time, lead_hours=lead_hours)
+
+
+def score_headline_vs_analysis_rows(
+    headline: xr.Dataset,
+    analysis: xr.Dataset,
+    *,
+    init_id: int,
+    init_time: datetime,
+    lead_hours: int,
+) -> list[dict[str, Any]]:
+    """Per-lead RMSE(variant, HRES-T0) after mapping headline keys back to Aurora names."""
+    rows: list[dict[str, Any]] = []
+    for slice_ in HEADLINE_SLICES:
+        aurora = headline_aurora_dataset(headline, slice_)
+        truth_field = analysis[slice_.aurora_name]
+        if slice_.level is not None:
+            truth_field = truth_field.sel(level=[slice_.level])
+        truth = align_truth_to_forecast(aurora, truth_field.to_dataset(name=slice_.aurora_name))
+        mse = MSE().compute_chunk(aurora, truth)
+        rows.extend(
+            rmse_rows_from_mse(
+                mse,
+                init_id=init_id,
+                init_time=init_time,
+                lead_hours=lead_hours,
+            )
+        )
+    return rows
+
+
+def _rmse_dataset_to_rows(
+    rmse: xr.Dataset,
+    *,
+    init_id: int,
+    init_time: datetime,
+    lead_hours: int,
+) -> list[dict[str, Any]]:
+    """Flatten an already-sqrt RMSE dataset (fidelity helpers, not ``MSE``)."""
+    rows: list[dict[str, Any]] = []
+    init_iso = init_time.isoformat()
+    for name, data_array in rmse.data_vars.items():
+        if "level" in data_array.dims:
+            for level in data_array["level"].values:
+                rows.append(
+                    {
+                        "init_id": init_id,
+                        "init_time": init_iso,
+                        "lead_hours": lead_hours,
+                        "variable": name,
+                        "level": int(level),
+                        "rmse": float(np.asarray(data_array.sel(level=level)).item()),
+                    }
+                )
+        else:
+            rows.append(
+                {
+                    "init_id": init_id,
+                    "init_time": init_iso,
+                    "lead_hours": lead_hours,
+                    "variable": name,
+                    "level": None,
+                    "rmse": float(np.asarray(data_array).item()),
+                }
+            )
+    return rows
 
 
 def _select_headline_fields(dataset: xr.Dataset) -> xr.Dataset:

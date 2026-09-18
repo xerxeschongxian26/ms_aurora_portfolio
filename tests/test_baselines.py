@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -10,14 +11,19 @@ import xarray as xr
 
 from aurora_inference.evaluation.baselines import (
     FLOOR_LEAD_HOURS,
+    HEADLINE_KEYS,
     HEADLINE_SLICES,
     headline_aurora_dataset,
     init_forecast_dir,
     lead_zarr_path,
+    persist_init_ids_by_time,
     read_lead_forecast,
+    score_headline_vs_analysis_rows,
+    score_headline_vs_baseline_rows,
     select_persist_fields,
     write_lead_forecast,
 )
+from aurora_inference.evaluation.tables import write_rmse_tables
 
 
 def _forecast_grid() -> xr.Dataset:
@@ -91,3 +97,63 @@ def test_write_read_lead_forecast_round_trips(tmp_path: Path) -> None:
 
 def test_floor_lead_hours_are_days_1_5_10() -> None:
     assert FLOOR_LEAD_HOURS == (24, 120, 240)
+
+
+def test_persist_init_ids_by_time_pairs_on_init_time(tmp_path: Path) -> None:
+    write_rmse_tables(
+        [
+            {
+                "init_id": 6,
+                "init_time": "2022-04-07T00:00:00",
+                "lead_hours": 6,
+                "variable": "2t",
+                "level": None,
+                "rmse": 1.0,
+            },
+            {
+                "init_id": 6,
+                "init_time": "2022-04-07T00:00:00",
+                "lead_hours": 12,
+                "variable": "2t",
+                "level": None,
+                "rmse": 1.1,
+            },
+        ],
+        tmp_path,
+    )
+    mapping = persist_init_ids_by_time(tmp_path)
+    assert mapping == {"2022-04-07T00:00:00": 6}
+
+
+def test_score_headline_vs_baseline_rows_constant_offset() -> None:
+    headline = select_persist_fields(_forecast_grid(), "headline")
+    shifted = headline.copy(deep=True)
+    shifted["2t"] = headline["2t"] + 4.0
+    rows = score_headline_vs_baseline_rows(
+        shifted,
+        headline,
+        init_id=6,
+        init_time=datetime(2022, 4, 7, 0, 0),
+        lead_hours=6,
+    )
+    by_var = {row["variable"]: row["rmse"] for row in rows}
+    assert set(by_var) == set(HEADLINE_KEYS)
+    np.testing.assert_allclose(by_var["2t"], 4.0)
+    np.testing.assert_allclose(by_var["z500"], 0.0)
+
+
+def test_score_headline_vs_analysis_rows_uses_aurora_names() -> None:
+    full = _forecast_grid()
+    headline = select_persist_fields(full, "headline")
+    rows = score_headline_vs_analysis_rows(
+        headline,
+        full,
+        init_id=1,
+        init_time=datetime(2022, 1, 1, 12, 0),
+        lead_hours=6,
+    )
+    names = {(row["variable"], row["level"]) for row in rows}
+    assert ("2t", None) in names
+    assert ("z", 500) in names
+    assert ("t", 850) in names
+    assert all(float(row["rmse"]) == 0.0 for row in rows)

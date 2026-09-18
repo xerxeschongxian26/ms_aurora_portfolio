@@ -18,7 +18,9 @@
 # Catalogue: configs/hres_t0_outsample_holes.csv. Do not hardcode this
 # list in Python.
 
-splice_path = "data/splice_hres_t0_2022_spread.zarr"
+# Lambda NFS out-sample HRES-T0 (same store WP5b used). Absolute so the box
+# does not depend on a cwd symlink to data/splice_hres_t0_2022_spread.zarr.
+splice_path = "/home/ubuntu/xerxes-nfs/splice_hres_t0_2022_full.zarr"
 
 n_rollout_steps = 40
 

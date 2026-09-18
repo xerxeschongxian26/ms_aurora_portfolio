@@ -14,7 +14,9 @@
 # No forecast cubes or PNGs. Hugging Face weights stay in ~/.cache/huggingface
 # (or $HF_HOME) if the aurora-finetuned checkpoint is not already cached.
 
-splice_path = "data/splice_hres_t0_2022_spread.zarr"
+# Lambda NFS out-sample HRES-T0 (same store WP5b used). Absolute so the box
+# does not depend on a cwd symlink to data/splice_hres_t0_2022_spread.zarr.
+splice_path = "/home/ubuntu/xerxes-nfs/splice_hres_t0_2022_full.zarr"
 
 n_rollout_steps = 40
 
