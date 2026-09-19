@@ -309,6 +309,7 @@ is `TODO(stage-4)`.
 - [`docs/hres-t0-source-notes.md`](hres-t0-source-notes.md)
 - [`docs/decisions/0003-checkpoint-pinning.md`](decisions/0003-checkpoint-pinning.md)
 - [`docs/decisions/0004-hres-t0-source-of-record.md`](decisions/0004-hres-t0-source-of-record.md)
+- [`docs/decisions/0005-evaluation-approach.md`](decisions/0005-evaluation-approach.md)
 - [`configs/hres_t0_2022_spread_rollout.toml`](../configs/hres_t0_2022_spread_rollout.toml)
 - [`configs/hres_t0_2022_fidelity_screen_rollout.toml`](../configs/hres_t0_2022_fidelity_screen_rollout.toml)
 - [microsoft/aurora#197](https://github.com/microsoft/aurora/issues/197)
