@@ -22,7 +22,7 @@ To my knowledge, no published characterisation of this trade-off exists for Auro
 
 | Variant | What is cast | s / step | Peak VRAM (GiB) | Δ RMSE vs baseline, z500 | Δ RMSE vs baseline, t850 | Δ RMSE vs baseline, 2t | n |
 |---|---|---|---|---|---|---|---|
-| `fp32` (baseline) | nothing | `[X]` | `[X]` | 0 (bitwise) | 0 (bitwise) | 0 (bitwise) | 30 |
+| `fp32` (baseline) | cuDNN TF32 by default, matmul fp32 | `[X]` | `[X]` | 0 (bitwise) | 0 (bitwise) | 0 (bitwise) | 30 |
 | `tf32` | matmul + cuDNN | `[X]` | `[X]` | `[X]` | `[X]` | `[X]` | 30 |
 | `bf16-autocast` | backbone only (encoder/decoder stay fp32) | `[X]` | `[X]` | `[X]` | `[X]` | `[X]` | 30 |
 
@@ -85,10 +85,11 @@ Before measuring precision trade-offs, the codebase was validated against the be
 | 0 | Environment, Docker, dependencies | ✅ Done |
 | 1 | Forecast pipeline — end-to-end inference | ✅ Done |
 | 2 | Evaluation harness — Q1 skill + Q2 fidelity wiring | ✅ Done |
-| 3 | **Inference Optimisation** — dtype variants, per-module sweep, batching | 🔧 In progress |
-| 4 | Report, figures, optional extended evaluation| 📝 Planned |
-| 5 | **Inference Serving** — Example use case | 📝 Planned |
+| 3 | **Inference optimisation** — mixed precision, then batching only if peak VRAM drops; optional PTQ | 🔧 In progress |
+| 4 | Report, figures, optional extended evaluation | 📝 Planned |
+| 5 | **Inference serving** — one init in, forecast out | 📝 Planned |
 
+Stage 3 is gated, not a checklist: (1) `tf32` and `bf16-autocast` vs the saved fp32 maps; (2) `B>1` **only if** mixed precision actually lowers peak VRAM on this A100 40GB (fp32 already OOMs at `B=2`); (3) hand-rolled post-training quantisation is an **appendix**, not a gate. Then Stage 4 write-up and Stage 5 serving with the cheapest variant that stayed inside the RMSE budget.
 
 ## Contributions to upstream
 
