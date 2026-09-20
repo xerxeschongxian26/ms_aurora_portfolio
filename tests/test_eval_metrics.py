@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from aurora_inference.evaluation.metrics import MSE
+from aurora_inference.evaluation.metrics import MSE, get_lat_weights
 
 _FIXTURE = Path(__file__).resolve().parent / "fixtures" / "eval_z500_rmse_on_cropped_grid.npz"
 
@@ -46,3 +46,28 @@ def test_mse_rejects_north_to_south_latitude() -> None:
     truth = truth.sortby("latitude", ascending=False)
     with pytest.raises(ValueError, match="not increasing"):
         MSE().compute_chunk(forecast, truth)
+
+
+def test_mse_accumulates_in_fp64_returns_fp32() -> None:
+    latitude = np.array([-60.0, 0.0, 60.0], dtype=np.float32)
+    longitude = np.array([0.0, 90.0, 180.0, 270.0], dtype=np.float32)
+    coords = {"latitude": latitude, "longitude": longitude}
+    forecast_values = np.array(
+        [[1.0, 1.0001, 0.9999, 1.0], [1.0, 1.0, 1.0, 1.0], [0.9998, 1.0, 1.0002, 1.0]],
+        dtype=np.float32,
+    )
+    truth_values = np.ones((3, 4), dtype=np.float32)
+    forecast = xr.Dataset({"2t": (("latitude", "longitude"), forecast_values)}, coords=coords)
+    truth = xr.Dataset({"2t": (("latitude", "longitude"), truth_values)}, coords=coords)
+
+    mse = MSE().compute_chunk(forecast, truth)
+    assert mse["2t"].dtype == np.float32
+
+    weights = get_lat_weights(forecast)
+    squared = (forecast_values.astype(np.float64) - truth_values.astype(np.float64)) ** 2
+    expected = float(
+        xr.DataArray(squared, dims=("latitude", "longitude"), coords=coords)
+        .weighted(weights)
+        .mean(["latitude", "longitude"])
+    )
+    np.testing.assert_allclose(float(mse["2t"]), np.float32(expected))

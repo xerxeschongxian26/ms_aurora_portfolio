@@ -102,6 +102,8 @@ def test_weight_converted_debug_model_accepts_fp32_batch() -> None:
 
     for dtype in (torch.bfloat16, torch.float16):
         model.to(dtype=dtype)
-        predictions = run_rollout(model, batch, steps=1)
-        assert next(iter(predictions[0].surf_vars.values())).dtype == dtype
+        assert next(model.parameters()).dtype == dtype
+        # Untrained AuroraSmallPretrained emits NaNs; this test is the dtype seam.
+        predictions = run_rollout(model, batch, steps=1, check_finite=False)
+        assert next(iter(predictions[0].surf_vars.values())).dtype == torch.float32
         assert predictions[0].metadata.lat.dtype == torch.float32

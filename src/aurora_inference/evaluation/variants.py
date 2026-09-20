@@ -145,8 +145,17 @@ def _wrap_forward_in_autocast(model: Aurora, *, dtype: torch.dtype) -> Aurora:
     return model
 
 
-def _fp32_baseline_factory() -> Aurora:
+def _isolate_leftover_fp32_matmul() -> None:
+    """Full-width leftover FP32 matmuls so TF32 cannot leak from a prior variant.
+
+    Typed ``matmul_operand`` still names the variant's intended width. This flag
+    only pins ops that remain FP32 (AMP leftovers, LayerNorm, etc.).
+    """
     torch.set_float32_matmul_precision("highest")
+
+
+def _fp32_baseline_factory() -> Aurora:
+    _isolate_leftover_fp32_matmul()
     return load_model("aurora-finetuned")
 
 
@@ -156,12 +165,14 @@ def _tf32_matmul_factory() -> Aurora:
 
 
 def _bf16_amp_backbone_factory() -> Aurora:
+    _isolate_leftover_fp32_matmul()
     model = load_model("aurora-finetuned")
     model.autocast = True
     return model
 
 
 def _bf16_amp_full_factory() -> Aurora:
+    _isolate_leftover_fp32_matmul()
     model = load_model("aurora-finetuned")
     return _wrap_forward_in_autocast(model, dtype=torch.bfloat16)
 
@@ -169,18 +180,21 @@ def _bf16_amp_full_factory() -> Aurora:
 def _bf16_weights_factory() -> Aurora:
     # microsoft-aurora==1.8.0 remaps Aurora(bf16_mode=True) to backbone autocast.
     # Issue #127 is about converting resident weights; do that in place.
+    _isolate_leftover_fp32_matmul()
     model = load_model("aurora-finetuned")
     model = model.to(dtype=torch.bfloat16)
     return _convert_incoming_batch_to_param_dtype(model)
 
 
 def _fp16_weights_factory() -> Aurora:
+    _isolate_leftover_fp32_matmul()
     model = load_model("aurora-finetuned")
     model.half()
     return _convert_incoming_batch_to_param_dtype(model)
 
 
 def _fp16_weights_amp_factory() -> Aurora:
+    _isolate_leftover_fp32_matmul()
     model = load_model("aurora-finetuned")
     model.half()
     model = _convert_incoming_batch_to_param_dtype(model)

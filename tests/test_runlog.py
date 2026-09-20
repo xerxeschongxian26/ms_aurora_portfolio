@@ -10,9 +10,11 @@ from conftest import make_valid_batch
 
 from aurora_inference.config import AURORA_HF_REVISION
 from aurora_inference.runlog import (
+    DeclaredPrecision,
     EnvSnapshot,
     HygieneFlags,
     MemoryRecord,
+    ObservedModuleDType,
     RunIdentity,
     RunLog,
     StepChecksum,
@@ -22,6 +24,7 @@ from aurora_inference.runlog import (
     cuda_timing_available,
     load_run_log,
     measure_cuda_elapsed_ms,
+    read_attention_routine,
     read_hygiene_flags,
     reset_vram_peak,
     snapshot_memory,
@@ -142,3 +145,45 @@ def test_load_run_log_rejects_unknown_keys(tmp_path: Path) -> None:
     path.write_text('{"not_a_run_log": true}\n', encoding="utf-8")
     with pytest.raises(Exception, match="env|Field|required"):
         load_run_log(path)
+
+
+def test_run_log_round_trips_precision_fields_without_gpu(tmp_path: Path) -> None:
+    original = _sample_run_log()
+    original = original.model_copy(
+        update={
+            "declared_precision": DeclaredPrecision(
+                weights_dtype="bf16",
+                matmul_operand="bf16",
+                accumulator="unguaranteed",
+                reduction_ops="ambient",
+                scope="whole-model",
+            ),
+            "observed_formats": [
+                ObservedModuleDType(
+                    module="encoder",
+                    input_dtype="bf16",
+                    output_dtype="bf16",
+                    qualified_name="encoder",
+                )
+            ],
+            "declared_vs_observed": "PASS",
+            "attention_routine": None,
+            "finiteness_passed": True,
+            "inverted_zero_verdict": "SUSPECT — variant may not have applied",
+        }
+    )
+    path = tmp_path / "run_init-0.json"
+    write_run_log(path, original)
+    loaded = load_run_log(path)
+    assert loaded == original
+    if torch.cuda.is_available():
+        assert isinstance(read_attention_routine(), str)
+    else:
+        assert read_attention_routine() is None
+    flags = read_hygiene_flags()
+    assert flags.allow_fp16_reduced_precision_reduction is None or isinstance(
+        flags.allow_fp16_reduced_precision_reduction, bool
+    )
+    assert flags.allow_bf16_reduced_precision_reduction is None or isinstance(
+        flags.allow_bf16_reduced_precision_reduction, bool
+    )
