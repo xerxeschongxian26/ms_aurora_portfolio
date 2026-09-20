@@ -10,9 +10,9 @@ Sections follow the [Backstage ADR template](https://github.com/backstage/backst
 
 ## Context
 
-Stage 3 will change how we *run* Aurora (fewer bits; later maybe batching).
-That is a different question from “is this still the paper model?”. We keep
-those as two checks:
+Stage 3 will change how we *run* Aurora (fewer bits used in computation; maybe batching if possible).
+That is a different question from whether this pipeline still matches the
+published 0.25° fine-tune. We keep those as two checks:
 
 | Check | Question | Compared to |
 |---|---|---|
@@ -28,13 +28,12 @@ order, stacked lead times) is an easy place for a quiet bug.
 
 Q2 has two standard questions, not one. CESM-ECT (Baker et al., 2015)
 compares a new run to a trusted baseline and does **not** use ground truth.
-Quantization papers compare each run to **truth**. A draft here divided
-those into one “fidelity ratio”. Neither community does that, so we dropped
-it.
+Quantization papers compare each run to **truth**.
 
 Init dates in Python (`BENCHMARK_INITS_*`) would drift from the TOML files
-and from the hole list. The paper uses 730 starts; we cannot afford that.
-Six starts are cheap enough to try every change, and too few to publish.
+and from the hole list. The paper uses 730 starts; we cannot afford that
+computational cost. Six starts are cheap enough to try every change, and too
+few to publish.
 
 Measured floors and the SKU are in
 [`docs/benchmark-target.md`](../benchmark-target.md) §6–§11. This ADR locks
@@ -64,13 +63,13 @@ store time with non-finite values.
 
 Q1 uses **30** hole-aware starts through 2022, not 730. PASS is our rule:
 every headline variable, every lead, within 5% of WB2’s n=730 curve. The 5%
-band is not a paper number. Weights: [ADR 0003](0003-checkpoint-pinning.md).
-Truth: [ADR 0004](0004-hres-t0-source-of-record.md).
+band is not a paper number.
 
 Q2 uses two subsets of those 30. **Screen (n=6)** is the first try on every
 change. **Confirm (n=30)** is required before RMSE goes in a post, the
 README, or a report. Always write `n`. Do not add dates to the screen file.
-Do not publish screen RMSE as the result.
+Do not publish screen RMSE as the result. Any public Q2 RMSE has to come
+from a confirm run (n=30).
 
 Q2 stores **two RMSEs**, both using the same `MSE`:
 
@@ -79,17 +78,15 @@ Q2 stores **two RMSEs**, both using the same `MSE`:
 - **M2** — variant vs HRES-T0 (`compute_rmse_score_variant_vs_ground_truth`).
   Did skill get worse? Same question as Q1.
 
-There is no `skill_penalty` in `src/`. If we want a percent change vs the
-baseline’s skill, we compute it later from the two tables. Dividing M1 by
-skill error (the old “fidelity ratio”) stays dropped.
+There is no `skill_penalty` in `src/`. A percent change vs baseline skill is
+post-processing from the two tables. Dividing M1 by skill error (the old
+“fidelity ratio”) stays dropped. We will not rebuild `converter.py` or
+`skill.py` unless a later work package asks.
 
 Stage 3 adds a row to `VARIANTS` in `evaluation/variants.py`. The Q2 script
 looks up the name and builds the model. Stage 2 only ships `fp32-baseline`.
 Torch flags are part of that baseline. We record what torch actually had,
 not what the variant text claimed.
-
-We will not rebuild `converter.py` or `skill.py` unless a later work package
-asks.
 
 ## Consequences
 
@@ -97,18 +94,18 @@ asks.
   the variant list, and the schedule guards. They do not download WB2 or
   weights.
 - A `weatherbench2` upgrade cannot quietly change Q1. Notebooks may still
-  use the package; that is not the gate.
+  use the package; that path is not the gate.
 - Scoring holds one lead in RAM, not forty. Later jobs read the saved
-  headline maps; they do not re-run fp32 to score.
+  headline maps; they do not re-run a fp32 configuration just to score.
 - Changing the baseline (matmul precision, `cudnn.benchmark`,
   `cudnn.allow_tf32`) means a new archive and new timings.
 - Screen numbers stay internal. Public RMSE is n=30, with the GPU named. A
-  tiny M1 at or below the same-run floor is noise.
+  tiny M1-RMSE value at or below the same-run floor is considered noise.
 - A new cheaper run is a registry row plus `run_fidelity.py`, not a new
   metric library. Training, QAT, and LoRA tuning stay out
   ([ADR 0001](0001-inference-only-scope.md)).
-- Using a small initial-condition ensemble as the M1 pass bar is
-  `TODO(stage-4)`.
+- How large M1 may be before we call it real, using a small
+  initial-condition ensemble, belongs to `TODO(stage-4)`.
 
 ## References
 
