@@ -22,9 +22,11 @@ To my knowledge, no published characterisation of this trade-off exists for Auro
 
 | Variant | What is cast | s / step | Peak VRAM (GiB) | Δ RMSE vs baseline, z500 | Δ RMSE vs baseline, t850 | Δ RMSE vs baseline, 2t | n |
 |---|---|---|---|---|---|---|---|
-| `fp32` (baseline) | cuDNN TF32 by default, matmul fp32 | `[X]` | `[X]` | 0 (bitwise) | 0 (bitwise) | 0 (bitwise) | 30 |
+| `fp32` (baseline) | matmul TF32 off (`highest`); cuDNN TF32 default-on | ~6.3 | ~27.1 | 0 (bitwise) | 0 (bitwise) | 0 (bitwise) | 6 |
 | `tf32` | matmul + cuDNN | `[X]` | `[X]` | `[X]` | `[X]` | `[X]` | 30 |
 | `bf16-autocast` | backbone only (encoder/decoder stay fp32) | `[X]` | `[X]` | `[X]` | `[X]` | `[X]` | 30 |
+
+`fp32` s/step and peak VRAM are measured on this A100. Bitwise Δ RMSE is the **n=6** Q2 screen vs the headline archive (`6 × 40 × 8` = 1 920 zeros), not an n=30 confirm. `tf32` / `bf16-autocast` cells stay empty until Stage 3; their `n=30` is the planned confirm size.
 
 ### Key findings
 
@@ -52,28 +54,30 @@ Before measuring precision trade-offs, the codebase was validated against the be
 - **8 headline variables** (z500, t850, 2t, 10u, msl, u500, t500, q500), n=30 inits from 2022 (held out from training), within 5% of the WB2 n=730 reference at all lead times up to and including day 10.
 
 ### Bitwise Reproducibility
-- **Baseline floor:** fp32 vs fp32 RMSE = 0 across 1,920 comparisons. The setup is bitwise reproducible on this hardware. <span style="color:red">EXPAND ON THIS</span>
+- **Baseline floor (Q2 screen, n=6):** `fp32-baseline` vs the saved headline maps scored RMSE **0** on **1 920 / 1 920** rows (`6 × 40 × 8` headline slices). That is the Q2 wiring floor on this A100, not skill vs HRES-T0, and **not** an n=30 confirm of fp32 vs itself. Pairing uses persist `init_id` by `init_time` (spread ids 1, 6, 15, 16, 22, 24), not screen ordinal 1..6. Protocol: [`docs/benchmark-target.md`](docs/benchmark-target.md).
 
 ## Method
 
 | | Detail |
 |---|---|
-| **Model** | `microsoft/aurora` 0.25° fine-tuned ( Checkpoint [`0be7e57`](https://huggingface.co/microsoft/aurora/commit/0be7e57)) |
-| **Data** | HRES-T0 analysis, 2022 out-of-sample periodm, 00/12 UTC initialisation points only <span style="color:red">DESCRIBE HOLES?</span> |
-| **Metric** | Latitude-weighted RMSE  <span style="color:red">footnote, refactored WB2 formula</span> |
-| **What is cast** | `bf16-autocast`: Aurora's `autocast=True` (AMP bf16, backbone only). `tf32`: `float32_matmul_precision="high"` + `cudnn.allow_tf32=True`. |
+| **Model** | `microsoft/aurora` 0.25° fine-tuned (`aurora-0.25-finetuned.ckpt` @ [`0be7e57`](https://huggingface.co/microsoft/aurora/commit/0be7e57)) |
+| **Data** | WB2 HRES-T0 analysis, 2022 out-of-sample period, 00/12 UTC inits only. A hole is a store time with non-finite values; any window that touches [`configs/hres_t0_outsample_holes.csv`](configs/hres_t0_outsample_holes.csv) is skipped, not imputed. |
+| **Metric** | Latitude-weighted RMSE (`cos(lat)` weights normalised to unit mean; WB2 / Aurora Supp. F, eq. F14) in `aurora_inference.evaluation.metrics.MSE`. No ACC. Runtime `src/` does not import `weatherbench2`. |
+| **What is cast** | Stage 2 ships `fp32-baseline` only (`float32_matmul_precision="highest"`; `cudnn.allow_tf32` unset). `bf16-autocast` (`Aurora(autocast=True)`, backbone only) and `tf32` (`float32_matmul_precision="high"`) stay unmeasured until Stage 3. |
 | **Hardware** | Single NVIDIA A100-SXM4-40GB, PyTorch `2.12.1+cu130`, CUDA `runtime 13.0` |
-| **Init sets** | n=6 screen (1/quarter + 2 high-gradient cases), n=30 confirm (year-spread) <span style="color:red">expand? this is confusing</span>|
+| **Init sets** | Q1 skill: n=30 year-spread ([`configs/hres_t0_2022_spread_rollout.toml`](configs/hres_t0_2022_spread_rollout.toml)). Q2 screen: n=6 ([`configs/hres_t0_2022_fidelity_screen_rollout.toml`](configs/hres_t0_2022_fidelity_screen_rollout.toml)). Public Q2 RMSE later requires the n=30 confirm. |
 
-- <span style="color:red">Describe selected init points further</span> 
-- All timings recorded using CUDA Events with 3-step warm-up
-- Memory recorded via `torch.cuda.max_memory_allocated`  
+- Screen inits: one per named month (Jan / Apr / Jul / Oct) plus European heat-dome `2022-07-18T12` and Hurricane Ian `2022-09-27T00`.
+- Timings: CUDA Events after a 3-step warm-up. Memory: `torch.cuda.max_memory_allocated` (~27.1 GiB allocated; ~37.6 GiB reserved).
+- **GPU spend (Stage 2).** Two terminated A100-SXM4-40GB sessions: persist n=30 (`scripts/save_baseline_forecasts.py`, ~4.6 h) and Q2 screen n=6 (`scripts/run_fidelity.py`, ~0.64 h). Console $/hr was not recorded at booking. NFS still bills splice ~228 GiB + headline archive ~32 GiB at ~$0.20/GiB-month until those volumes are deleted.
+
 ---
 
 ## Limitations
 
-- **n=30**, not the supplementary information's full 730-init out-sample testing protocol
-- Single GPU - A100-SXM4-40GG
+- **n=30** for Q1 skill, not the supplementary information's full 730-init out-sample protocol
+- Bitwise 1 920 is the **n=6** screen, not an n=30 fp32-vs-itself confirm
+- Single GPU — A100-SXM4-40GB
 - RMSE on _headline variables_ only — no ACC, no extreme-event metrics
 - Deterministic model only (not Aurora 1.5 ENS)
 ---
