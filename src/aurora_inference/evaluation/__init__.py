@@ -1,4 +1,4 @@
-"""Stage 2 evaluation helpers (eval-schedule, later converter / skill)."""
+"""Stage 2 evaluation helpers (eval-schedule, latitude-weighted MSE, RMSE tables)."""
 
 from aurora_inference.evaluation.evaluation_schedule import (
     EvalSchedule,

@@ -108,7 +108,7 @@ Do **not** treat an x86 box as “the same as GH200.” Same Docker *recipe*, di
 | Lambda A10 / A100 / H100 | `uname` → `Linux`; `uname -m` → `x86_64` |
 | Lambda GH200 | `uname` → `Linux`; `uname -m` → `aarch64` |
 
-The GPU image is `nvidia/cuda:12.6.3-runtime-ubuntu22.04`. Keep container CUDA in **12.4–12.8**. Torch CUDA-index pin (`cu124`/`cu126`) is still a `TODO(stage-2)` in the Dockerfile; WP6 used `uv sync --frozen --extra forecast` without an explicit index and CUDA was available.
+The GPU image is `nvidia/cuda:12.6.3-runtime-ubuntu22.04`. Keep container CUDA in **12.4–12.8**. Torch CUDA-index pin (`cu124`/`cu126`) is `TODO(stage-3)` in the Dockerfile; WP6 used `uv sync --frozen --extra forecast` without an explicit index and CUDA was available.
 
 ---
 
