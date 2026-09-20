@@ -9,7 +9,9 @@ not skill — do not quote those RMSEs.
 GPU campaign: roll a named ``VARIANTS`` entry on a rollout TOML, score each
 lead against the WP5b **headline** archive (RMSE vs baseline) and HRES-T0
 (RMSE vs truth). Pair ``(init_id, lead_hours)`` using persist ``init_time``,
-not the screen TOML's 1..6 re-index.
+not the screen TOML's 1..6 re-index. ``--max-steps`` truncates the TOML
+``n_rollout_steps`` without editing the frozen schedule; leftover archive
+leads are unused, not missing.
 
 Example::
 
@@ -19,7 +21,8 @@ Example::
     uv run --extra forecast python scripts/run_fidelity.py \\
         --baseline-dir /path/to/wp5b-baselines-n30-headline \\
         --rollout-config configs/hres_t0_2022_fidelity_screen_rollout.toml \\
-        --output-dir /path/to/nfs/aurora-fidelity --tag screen-fp32
+        --output-dir /path/to/nfs/aurora-fidelity --tag screen-fp32 \\
+        --max-steps 10
 """
 
 from __future__ import annotations
@@ -164,7 +167,24 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=None,
         help="cap unique inits after the TOML schedule (GPU smoke; default: all)",
     )
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=None,
+        help="cap rollout steps after the TOML n_rollout_steps (GPU campaign; default: all)",
+    )
     return parser.parse_args(argv)
+
+
+def _capped_rollout_steps(scheduled: int, max_steps: int | None) -> int:
+    """Return the TOML step count, truncated by ``--max-steps`` when set.
+
+    Does not extend a campaign: ``max_steps`` above ``scheduled`` still returns
+    ``scheduled``. Unused archive leads past the cap are left unread.
+    """
+    if max_steps is None:
+        return scheduled
+    return min(scheduled, max_steps)
 
 
 def _lookup_variant(name: str) -> VariantConfig | None:
@@ -545,6 +565,33 @@ def _variant_rollout(
     return preds, wall_s, cuda_ms, memory
 
 
+def _score_init_vs_baseline_archive(
+    preds: list[Batch],
+    *,
+    baseline_dir: Path,
+    persist_init_id: int,
+    init_time: datetime,
+    step_hours: int,
+) -> list[dict[str, Any]]:
+    """Score produced leads only. Extra archive zarrs are unused, not missing."""
+    init_dir = init_forecast_dir(baseline_dir, persist_init_id)
+    rows: list[dict[str, Any]] = []
+    for step_index, pred in enumerate(preds, start=1):
+        lead_hours = step_index * step_hours
+        variant_grid = select_persist_fields(batch_to_dataset(pred), FIELDS_HEADLINE)
+        baseline_grid = read_lead_forecast(lead_zarr_path(init_dir, lead_hours))
+        rows.extend(
+            score_headline_vs_baseline_rows(
+                variant_grid,
+                baseline_grid,
+                init_id=persist_init_id,
+                init_time=init_time,
+                lead_hours=lead_hours,
+            )
+        )
+    return rows
+
+
 def _score_init_against_archive(
     preds: list[Batch],
     *,
@@ -555,22 +602,17 @@ def _score_init_against_archive(
     init_time: datetime,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     step_hours = spec.input_timestep_hours
-    init_dir = init_forecast_dir(baseline_dir, persist_init_id)
-    vs_baseline: list[dict[str, Any]] = []
+    vs_baseline = _score_init_vs_baseline_archive(
+        preds,
+        baseline_dir=baseline_dir,
+        persist_init_id=persist_init_id,
+        init_time=init_time,
+        step_hours=step_hours,
+    )
     vs_truth: list[dict[str, Any]] = []
     for step_index, pred in enumerate(preds, start=1):
         lead_hours = step_index * step_hours
         variant_grid = select_persist_fields(batch_to_dataset(pred), FIELDS_HEADLINE)
-        baseline_grid = read_lead_forecast(lead_zarr_path(init_dir, lead_hours))
-        vs_baseline.extend(
-            score_headline_vs_baseline_rows(
-                variant_grid,
-                baseline_grid,
-                init_id=persist_init_id,
-                init_time=init_time,
-                lead_hours=lead_hours,
-            )
-        )
         valid_time = init_time + timedelta(hours=lead_hours)
         analysis = analysis_dataset(source, valid_time, spec)
         vs_truth.extend(
@@ -651,6 +693,7 @@ def _run_gpu_init(
     init_pair: InitPair,
     *,
     persist_init_id: int,
+    steps: int,
     source: HresT0Source,
     model: Aurora,
     spec: ModelSpec,
@@ -670,13 +713,13 @@ def _run_gpu_init(
         "persist_init_id=%s init_time=%s steps=%s",
         persist_init_id,
         init_time.isoformat(),
-        init_pair.n_rollout_steps,
+        steps,
     )
     try:
         preds, wall_s, cuda_ms, memory = _variant_rollout(
             model,
             batch,
-            init_pair.n_rollout_steps,
+            steps,
             persist_init_id=persist_init_id,
             step_hours=spec.input_timestep_hours,
             init_time=init_time,
@@ -689,7 +732,7 @@ def _run_gpu_init(
             variant=variant,
             persist_init_id=persist_init_id,
             init_time=init_time,
-            n_steps=init_pair.n_rollout_steps,
+            n_steps=steps,
             load_s=load_s,
             rollout_s=0.0,
             rollout_ms=None,
@@ -731,7 +774,7 @@ def _run_gpu_init(
         variant=variant,
         persist_init_id=persist_init_id,
         init_time=init_time,
-        n_steps=init_pair.n_rollout_steps,
+        n_steps=steps,
         load_s=load_s,
         rollout_s=wall_s,
         rollout_ms=cuda_ms,
@@ -754,6 +797,7 @@ def _run_gpu_campaign(
     output_dir: Path,
     rollout_config: Path,
     max_inits: int | None,
+    max_steps: int | None,
 ) -> int:
     _apply_gpu_hygiene()
     spec = variant.spec
@@ -780,6 +824,15 @@ def _run_gpu_campaign(
         _LOG.error("campaign has no inits")
         hooks.remove()
         return 1
+
+    scheduled_steps = init_pairs[0].n_rollout_steps
+    steps = _capped_rollout_steps(scheduled_steps, max_steps)
+    if steps != scheduled_steps:
+        _LOG.info(
+            "capping rollout at %s steps (TOML n_rollout_steps=%s)",
+            steps,
+            scheduled_steps,
+        )
 
     resolved: list[tuple[InitPair, int]] = []
     for init_pair in init_pairs:
@@ -815,7 +868,8 @@ def _run_gpu_campaign(
                 "device": _GPU_DEVICE,
                 "env": env.model_dump(mode="json"),
                 "fields": FIELDS_HEADLINE,
-                "n_steps": first_pair.n_rollout_steps,
+                "max_steps": max_steps,
+                "n_steps": steps,
                 "rollout_config": str(rollout_config),
                 "sku": _sku(_GPU_DEVICE),
                 "variant": variant.name,
@@ -837,7 +891,8 @@ def _run_gpu_campaign(
             "device": _GPU_DEVICE,
             "env": env.model_dump(mode="json"),
             "fields": FIELDS_HEADLINE,
-            "n_steps": first_pair.n_rollout_steps,
+            "max_steps": max_steps,
+            "n_steps": steps,
             "rollout_config": str(rollout_config),
             "sku": _sku(_GPU_DEVICE),
             "variant": variant.name,
@@ -860,6 +915,7 @@ def _run_gpu_campaign(
         scored = _run_gpu_init(
             init_pair,
             persist_init_id=persist_init_id,
+            steps=steps,
             source=source,
             model=model,
             spec=spec,
@@ -910,6 +966,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.max_inits is not None and args.max_inits < 1:
         print(f"max-inits must be >= 1 (got {args.max_inits})", file=sys.stderr)
         return 2
+    if args.max_steps is not None and args.max_steps < 1:
+        print(f"max-steps must be >= 1 (got {args.max_steps})", file=sys.stderr)
+        return 2
 
     variant = _lookup_variant(args.variant)
     if variant is None:
@@ -958,6 +1017,7 @@ def main(argv: list[str] | None = None) -> int:
         output_dir=output_dir,
         rollout_config=rollout_config,
         max_inits=args.max_inits,
+        max_steps=args.max_steps,
     )
 
 

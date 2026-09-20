@@ -2,7 +2,7 @@
 
 Laptop proofs for WP2 are done. This is the **first GPU booking** of the mixed-precision slice: a 10-step n=6 screen on **A100-SXM4-40GB**. Do not book until this page has been reviewed and `make check` is green on `stage3_mixed_precision_study`.
 
-**`--max-steps` is WP3.** It is not in the tree at WP2 close. Add it (do not edit the frozen screen TOML) before step 4. `--cpu-dry-run` is not a substitute for anything on this page.
+**`--max-steps` is implemented** on `scripts/run_fidelity.py`. Do not edit the frozen screen TOML. `--cpu-dry-run` is not a substitute for anything on this page.
 
 ---
 
@@ -23,7 +23,7 @@ This session DoD:
   [ ] Clone stage3_mixed_precision_study; PLATFORM=linux/amd64 make docker-build-gpu
       (or uv sync --extra forecast --frozen on the box)
   [ ] WP2.3 archive re-score (step 2 below) — STOP the session if it aborts
-  [ ] --max-steps 10 exists (WP3 flag; add it before variant runs)
+  [ ] --max-steps 10 passed on every variant command (TOML stays 40)
   [ ] Three discarded warm-up forwards (harness already does this)
   [ ] Six precision variants, n=6, 10 steps, in the order below
   [ ] One run log per variant per starting date; artefacts on NFS / scp
@@ -84,12 +84,12 @@ uv run --extra forecast python scripts/rescore_baseline_leads.py \
 
 Three discarded 1-step forwards, already in `scripts/run_fidelity.py` `_warmup`. Do not skip.
 
-### 4. Precision screen (after `--max-steps` exists)
+### 4. Precision screen (`--max-steps 10`)
 
-`--max-steps` is **not** in the WP2 tree. Implement it in WP3, then:
+`--max-steps` truncates the frozen 40-step screen TOML at runtime. Do not edit the TOML.
 
 ```bash
-# WP3 adds --max-steps; do not edit the screen TOML.
+# Truncate at 10 steps; do not edit the screen TOML.
 for variant in tf32-matmul bf16-amp-backbone bf16-amp-full \
                bf16-weights fp16-weights fp16-weights-amp; do
   uv run --extra forecast python scripts/run_fidelity.py \
@@ -119,7 +119,7 @@ Per variant: run JSON (DVO, observed formats, inverted-zero, timings, VRAM), `vs
 ## Review notes (WP2 close)
 
 - WP2.3 is scripted (`scripts/rescore_baseline_leads.py`). It is **not** executed on the laptop.
-- `--max-steps` is deliberately absent until WP3. The loop in §4 is the intended command once that flag exists.
+- `--max-steps` is on `scripts/run_fidelity.py`. The loop in §4 is the booking command. Do not edit the screen TOML.
 - Skill gate remains the existing 5% band. The 1e-4 abort in WP2.3 is only “did the scorer rewrite move Stage 2 numbers”.
 
 ---
