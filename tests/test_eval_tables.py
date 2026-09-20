@@ -11,6 +11,7 @@ from aurora_inference.evaluation.tables import (
     MEAN_BY_LEAD_NAME,
     PER_INIT_NAME,
     load_rmse_rows,
+    relative_change,
     write_rmse_tables,
 )
 
@@ -62,3 +63,9 @@ def test_load_rmse_rows_roundtrip(tmp_path: Path) -> None:
 def test_write_rmse_tables_rejects_empty(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="no RMSE rows"):
         write_rmse_tables([], tmp_path)
+
+
+def test_relative_change_handles_zero_floor() -> None:
+    assert relative_change(0.0, 0.0) == 0.0
+    assert relative_change(2.0, 2.2) == pytest.approx(0.1)
+    assert relative_change(0.0, 4.0) == pytest.approx(1.0)
