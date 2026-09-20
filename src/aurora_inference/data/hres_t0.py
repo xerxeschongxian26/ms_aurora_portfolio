@@ -33,6 +33,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, cast
 
 import gcsfs
@@ -44,7 +45,7 @@ from aurora import Batch, Metadata
 
 from aurora_inference.contract import AURORA_PRETRAINED_SPEC, ModelSpec, validate_input_times
 
-__all__ = ["HresT0Source"]
+__all__ = ["HresT0Source", "open_connection_to_gcs", "open_local_zarr"]
 
 _WEATHER_DTYPE = torch.float32
 OUT_SAMPLE_START = pd.Timestamp("2022-01-01 00:00:00")
@@ -121,6 +122,19 @@ def open_connection_to_gcs(gcs_store_link: str) -> zarr.Group:
     return result
 
 
+def open_local_zarr(path: Path) -> zarr.Group:
+    """Open a local HRES-T0 zarr group (splice or fixture), not GCS."""
+    resolved = path if path.is_absolute() else Path.cwd() / path
+    if not resolved.exists():
+        msg = f"splice not found at {resolved}"
+        raise FileNotFoundError(msg)
+    result = zarr.open(resolved, mode="r")
+    assert isinstance(result, zarr.Group), (
+        f"expected a zarr.Group at {resolved}, got {type(result)}"
+    )
+    return result
+
+
 class InvalidInitTimeError(Exception):
     """Raised when an input init. time is considered invalid for data source"""
 
@@ -178,7 +192,7 @@ class HresT0Source:
         metadata = Metadata(
             lat=torch.tensor(
                 # (H,) is 1D, so axis=-2 is out of bounds here - unlike the (B,T,H,W)/
-                # (B,T,L,H,W)/(H,W) tensors above, H is axis 0, not second-to-last.
+                # (B,T,L,H,W) weather tensors above, H is axis 0, not second-to-last.
                 _flip_to_descending(_read_zarr_array(self.ZARR_DATA, "latitude"), axis=0),
                 dtype=torch.float32,
             ),
@@ -272,18 +286,23 @@ def _load_atmos_var(
 
 
 def _load_static_var(static_vars: dict[str, np.ndarray], key: str) -> torch.Tensor:
-    """Flip a cached ``(H, W)`` static variable's H axis to descending, cast to float32."""
-    array = _flip_to_descending(static_vars[key], axis=-2)  # (H, W) -> H is second-to-last
-    return torch.tensor(array, dtype=_WEATHER_DTYPE)
+    """Cast a cached ``(H, W)`` ERA5 static field to float32. No latitude flip.
+
+    ``aurora-0.25-static.pickle`` is already north-to-south (Aurora's required
+    descending lat). Microsoft's HRES-T0 demo leaves these unflipped for that
+    reason. Only WB2 HRES-T0 surf/atmos fields (and ``metadata.lat``) are flipped.
+    """
+    return torch.tensor(static_vars[key], dtype=_WEATHER_DTYPE)
 
 
 def _flip_to_descending(array: np.ndarray, *, axis: int) -> np.ndarray:
     """Reverse ``array`` along ``axis`` and return a contiguous copy.
 
     Converts HRES-T0's native ascending latitude into Aurora's required descending
-    order. Every tensor that shares this coordinate (surf/atmos/static data, and the
-    ``lat`` coordinate itself) must flip its *matching* axis - see
-    docs/batch-contract.md's lockstep flip rule.
+    order. Surf/atmos tensors that share this zarr coordinate, and the ``lat``
+    vector itself, must flip the matching axis together — see
+    docs/batch-contract.md's lockstep flip rule. Static fields are a different
+    source (ERA5 pickle) and must not go through this helper.
 
     The ``.copy()`` is required, not cosmetic: ``np.flip`` returns a negative-stride
     view, and ``torch.tensor()`` cannot consume negative strides.

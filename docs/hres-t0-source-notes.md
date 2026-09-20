@@ -48,8 +48,9 @@ The .pickle file contains the following:
 
 | Coordinate | Dimension | Native convention | Aurora-required convention | Remap needed? |
 |---|---|---|---|---|
-| `latitude` | 721 | Increasing from -90 to + 90 | Strictly decreasing from +90 to -90 | Yes
-| `longitude` | 1440 | Increasing from 0 to 359.8 | Strictly increasing from 0 to 360 (exclusive) | No
+| `latitude` (HRES-T0 zarr) | 721 | Increasing from -90 to + 90 | Strictly decreasing from +90 to -90 | Yes (surf/atmos + `lat`) |
+| `latitude` (ERA5 static pickle) | 721 | Decreasing from +90 to -90 | Strictly decreasing from +90 to -90 | No |
+| `longitude` | 1440 | Increasing from 0 to 359.8 | Strictly increasing from 0 to 360 (exclusive) | No |
 
 ## Pressure levels
 

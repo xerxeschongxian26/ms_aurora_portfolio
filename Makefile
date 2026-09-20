@@ -59,6 +59,16 @@ check: lint typecheck test
 PLATFORM ?= linux/arm64
 IMAGE_TAG_CPU := aurora-inference:cpu-$(subst /,-,$(PLATFORM))
 IMAGE_TAG_GPU := aurora-inference:gpu-$(subst /,-,$(PLATFORM))
+# Optional GPU run label: `make docker-run-gpu RUN_TAG=b1-s4 ARGS="--steps 1"`
+RUN_TAG ?=
+ARGS ?=
+ifneq ($(strip $(RUN_TAG)),)
+NAME_ARG := --name forecast-$(RUN_TAG)
+TAG_ARG := --tag $(RUN_TAG)
+else
+NAME_ARG :=
+TAG_ARG :=
+endif
 
 # Build the CPU only image for $(PLATFORM) and names the image with $(IMAGE_TAG_CPU) but does not run it.
 #   For x86 cloud hosts: "make docker-build-cpu PLATFORM=linux/amd64"
@@ -90,12 +100,17 @@ docker-run:
 			   --platform $(PLATFORM) \
 			   $(IMAGE_TAG_CPU)
 
-# Run the GPU image default CMD (scripts/real_forecast.py) with host GPUs and the
-# host HuggingFace cache mounted; deletes the container upon completion
+# Run the GPU image (scripts/real_forecast.py) with host GPUs, HF cache, and
+# ./outputs mounted so logs/PNGs survive --rm. Pass RUN_TAG and/or ARGS.
+#   make docker-run-gpu PLATFORM=linux/amd64 RUN_TAG=b1-s4 ARGS="--steps 1"
 docker-run-gpu:
+	mkdir -p outputs
 	docker run --gpus all \
 			   -e HF_HOME=/cache/huggingface \
 			   -v "$(HOME)/.cache/huggingface:/cache/huggingface" \
+			   -v "$(CURDIR)/outputs:/app/outputs" \
+			   $(NAME_ARG) \
 			   --rm \
 			   --platform $(PLATFORM) \
-			   $(IMAGE_TAG_GPU)
+			   $(IMAGE_TAG_GPU) \
+			   python scripts/real_forecast.py $(TAG_ARG) $(ARGS)

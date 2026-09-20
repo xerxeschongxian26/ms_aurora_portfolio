@@ -61,6 +61,18 @@ def test_orientation_lat_descending_lon_passthrough(
     assert np.allclose(loaded_2t_t1, expected_2t_t1)
 
 
+def test_static_vars_passthrough_already_descending(
+    hres_t0_source: HresT0Source,
+    hres_t0_static: dict[str, np.ndarray],
+) -> None:
+    """ERA5 static pickle is already north-to-south; load must not flip the H axis."""
+    batch = hres_t0_source.load(HRES_T0_FIXTURE_INIT_TIME, AURORA_PRETRAINED_SPEC)
+    for key in AURORA_PRETRAINED_SPEC.static_vars:
+        loaded = batch.static_vars[key].numpy()
+        assert np.allclose(loaded, hres_t0_static[key])
+        assert not np.allclose(loaded, np.flip(hres_t0_static[key], axis=0))
+
+
 def test_atmos_levels_and_z500_index(
     hres_t0_source: HresT0Source,
     hres_t0_zarr: zarr.Group,

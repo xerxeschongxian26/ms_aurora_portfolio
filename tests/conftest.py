@@ -32,9 +32,9 @@ HRES_T0_FIXTURE_INIT_TIME = datetime(2022, 6, 15, 12, 0)
 
 
 def _aurora_full_grid_coords() -> tuple[np.ndarray, np.ndarray]:
-    """Canonical 0.25° lat/lon axes for the full Aurora static grid (721×1440)."""
+    """Canonical 0.25° axes for the HF ERA5 static pickle (721×1440, north-to-south)."""
     height, width = _STATIC_FULL_SHAPE
-    lat = np.linspace(-90.0, 90.0, height, dtype=np.float32)
+    lat = np.linspace(90.0, -90.0, height, dtype=np.float32)
     lon = np.linspace(0.0, 360.0 - (360.0 / width), width, dtype=np.float32)
     return lat, lon
 
@@ -45,15 +45,17 @@ def _spatial_slice_for_fixture(zarr_data: zarr.Group) -> tuple[slice, slice]:
     fixture_lon = _read_zarr_array(zarr_data, "longitude").astype(np.float32)
     full_lat, full_lon = _aurora_full_grid_coords()
 
-    lat_start = int(np.where(np.isclose(full_lat, fixture_lat[0]))[0][0])
+    # HRES-T0 zarr lat is south-to-north; the pickle (and the loaded batch) are north-to-south.
+    target_lat = fixture_lat[::-1]
+    lat_start = int(np.where(np.isclose(full_lat, target_lat[0]))[0][0])
     lon_start = int(np.where(np.isclose(full_lon, fixture_lon[0]))[0][0])
-    lat_slice = slice(lat_start, lat_start + len(fixture_lat))
+    lat_slice = slice(lat_start, lat_start + len(target_lat))
     lon_slice = slice(lon_start, lon_start + len(fixture_lon))
 
-    if not np.allclose(full_lat[lat_slice], fixture_lat):
+    if not np.allclose(full_lat[lat_slice], target_lat):
         msg = (
             "fixture latitude does not align with canonical Aurora grid "
-            f"(start index {lat_start}, range [{fixture_lat[0]}, {fixture_lat[-1]}])"
+            f"(start index {lat_start}, range [{target_lat[0]}, {target_lat[-1]}])"
         )
         raise AssertionError(msg)
     if not np.allclose(full_lon[lon_slice], fixture_lon):
@@ -80,9 +82,10 @@ def load_hres_t0_fixture_static(
 ) -> dict[str, np.ndarray]:
     """Load static vars cropped to match ``zarr_data``'s lat/lon extent.
 
-    ``hres_t0_static.pickle`` holds the full 721×1440 HF static fields; the zarr
-    fixture is a smaller real slice. Crop by coordinate lookup on the canonical
-    Aurora grid so static H/W matches weather H/W after ``HresT0Source.load()``.
+    ``hres_t0_static.pickle`` holds the full 721×1440 HF static fields (already
+    north-to-south); the zarr fixture is a smaller real slice. Crop by coordinate
+    lookup on the descending Aurora grid so static H/W matches weather H/W after
+    ``HresT0Source.load()`` flips HRES-T0 lat.
     """
     if zarr_data is None:
         zarr_data = open_hres_t0_fixture_zarr()

@@ -7,6 +7,8 @@ batches have T=1 and therefore cannot pass the input contract.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import torch
 from aurora import Aurora, Batch, rollout
 
@@ -21,6 +23,8 @@ def run_rollout(
     steps: int,
     *,
     spec: ModelSpec = AURORA_PRETRAINED_SPEC,
+    offload_to_cpu: bool = False,
+    on_step: Callable[[int, Batch], None] | None = None,
 ) -> list[Batch]:
     """Roll the model forward ``steps`` times and return one ``Batch`` per lead time.
 
@@ -33,6 +37,11 @@ def run_rollout(
         batch: Input batch with T=2, validated against ``spec`` before rollout.
         steps: Number of 6-hour lead times to produce (must be >= 1).
         spec: Variable/level contract for the input batch.
+        offload_to_cpu: If True, copy each yielded pred to CPU (new ``Batch``) so
+            VRAM does not accumulate a 40-step list. Does not mutate the GPU
+            tensors ``rollout`` still uses for the next-step ``torch.cat``.
+        on_step: Optional callback ``(step_index, pred)`` after each lead
+            (1-based). Invoked after CPU offload when that flag is set.
 
     Returns:
         ``steps`` batches, each with time dim 1, in lead-time order
@@ -50,7 +59,13 @@ def run_rollout(
     validate_batch(batch, spec)
 
     with torch.inference_mode():
-        predictions = list(rollout(model, batch, steps))
+        predictions: list[Batch] = []
+        for step_index, pred in enumerate(rollout(model, batch, steps), start=1):
+            if offload_to_cpu:
+                pred = pred.to("cpu")
+            if on_step is not None:
+                on_step(step_index, pred)
+            predictions.append(pred)
 
     for pred in predictions:
         _assert_output_time_dim_is_one(pred)

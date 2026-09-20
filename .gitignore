@@ -20,6 +20,9 @@ notebooks/_scratch/
 # Scratch scripts (throwaway, debugger-friendly .py exploration - not a deliverable)
 scripts/_scratch/
 
+# Local long-form baseline notes (not tracked until WP6 decides otherwise)
+docs/baseline-definition.md
+
 # ML artefacts (generated, not source)
 /data/
 outputs/

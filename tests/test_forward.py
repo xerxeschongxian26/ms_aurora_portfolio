@@ -43,8 +43,15 @@ def test_run_rollout_small_model_cpu_returns_one_batch_per_step() -> None:
     batch = source.load(_INIT_TIME, AURORA_PRETRAINED_SPEC)
     model = load_model(device=_DEVICE)
 
-    predictions = run_rollout(model, batch, steps=_ROLLOUT_STEPS)
+    seen: list[int] = []
+    predictions = run_rollout(
+        model,
+        batch,
+        steps=_ROLLOUT_STEPS,
+        on_step=lambda step_index, _pred: seen.append(step_index),
+    )
 
+    assert seen == list(range(1, _ROLLOUT_STEPS + 1))
     assert len(predictions) == _ROLLOUT_STEPS
     expected_surf_var_shape = (1, 1, _GRID_HEIGHT, _GRID_WIDTH)
     expected_atmos_var_shape = (1, 1, _LEVEL_COUNT, _GRID_HEIGHT, _GRID_WIDTH)

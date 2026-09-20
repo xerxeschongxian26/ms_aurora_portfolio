@@ -4,7 +4,7 @@ Plumbing proof only — AuroraSmallPretrained has no forecast skill. Requires th
 ``viz`` extra (and ``dev`` for zarr/gcsfs)::
 
     uv sync --extra dev --extra viz
-    python scripts/real_forward.py --steps 4
+    python scripts/real_forward.py --steps 4 --tag b1-s4
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from aurora_inference.contract import AURORA_PRETRAINED_SPEC, validate_batch
 from aurora_inference.data.hres_t0 import HresT0Source, open_connection_to_gcs
 from aurora_inference.data.static_vars import get_hres_t0_static
 from aurora_inference.inference.forward import run_rollout
+from aurora_inference.logging import configure_run_logging, normalize_run_tag, run_artifact_dir
 from aurora_inference.model.loader import load_model
 
 _LOG = logging.getLogger(__name__)
@@ -65,17 +66,25 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=_DEFAULT_STEPS,
         help=f"rollout steps (default {_DEFAULT_STEPS}; WP4 acceptance uses 4)",
     )
+    parser.add_argument(
+        "--tag",
+        default=None,
+        help="optional run label; writes logs and PNGs under outputs/<tag>/",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        stream=sys.stdout,
-    )
+    try:
+        tag = normalize_run_tag(args.tag)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    output_dir = run_artifact_dir(_OUTPUT_DIR, tag)
+    configure_run_logging(output_dir / "real_forward.log", tag=tag)
     _LOG.warning(_NO_SKILL_BANNER)
+    _LOG.info("log file: %s", output_dir / "real_forward.log")
 
     # Create a HresT0 Batch object
     zarr_data = open_connection_to_gcs(gcs_store_link=GCS_STORE_LINK)
@@ -106,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     for i, pred in enumerate(predictions, start=1):
-        output_path = _OUTPUT_DIR / f"real_forward_2t_step{i:02d}.png"
+        output_path = output_dir / f"real_forward_2t_step{i:02d}.png"
         plot_batch_2t(pred, output_path)
 
     peak_rss_bytes = _peak_rss_bytes()

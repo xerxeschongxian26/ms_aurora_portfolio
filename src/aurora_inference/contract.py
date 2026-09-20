@@ -54,10 +54,11 @@ Common Traps:
   - lat strictly decreasing from +90 to -90
   - lon strictly increasing in [0, 360); must not include 360 (ERA5 often uses [-180, 180])
   - lat/lon dtypes should be float32 or float64 at minimum (float32 required for fields)
-  - ERA5 often arrives with ascending lat — when correcting, flip lat AND the H axis of
-    every surf/atmos/static tensor in lockstep (lon remaps must reorder W likewise).
-    Never flip coordinates alone. Synthetic fixtures should build orientation correctly
-    from the start (Stage 0); real ERA5 remapping is Stage 1 source work.
+  - HRES-T0 zarr arrives with ascending lat — when correcting, flip lat AND the H axis of
+    every surf/atmos tensor in lockstep (lon remaps must reorder W likewise).
+    Never flip coordinates alone. Static vars come from the ERA5 HF pickle and are
+    already descending — do not flip them. Synthetic fixtures should build orientation
+    correctly from the start (Stage 0).
 
   Variables
   - Two different "z" keys: static_vars["z"] is orography; atmos_vars["z"] is

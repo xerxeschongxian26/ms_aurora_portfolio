@@ -1,224 +1,120 @@
-# Project Name: aurora-inference
+# How much precision does Aurora actually need?
+<sub>_This is an independent study, not affiliated with or endorsed by Microsoft or the author's employer._</sub>
 
+> **_Insert example key result here_**  
+> e.g. bf16 autocast on a single A100-40GB: `[X]`× faster, `[Y]`% less peak VRAM, forecast RMSE within `[Z]`% of full precision to day 10.
+
+This repository presents an independent study of mixed-precision inference for [Microsoft Aurora](https://github.com/microsoft/aurora) (0.25° fine-tuned checkpoint).  
+To my knowledge, no published characterisation of this trade-off exists for Aurora.
+
+<!-- EYE-CATTCHING - VISUALS 10-day rollout animation -->
 <p align="center">
-  <img src="docs/images/hres_t0_forecast_2t.png" alt="Global 2 m temperature from an Aurora 0.25° fine-tuned forecast on HRES-T0" width="800"/>
+  <img src="/Users/xerxeschongxian26/Desktop/Turning Pro/ms_aurora_portfolio/docs/images/hres_t0_forecast_2t.png" alt="10-day 2m temperature forecast" width="720"/>
+  <br><em>10-day global 2m temperature forecast from <insert time here> initalisation point, produced by this pipeline.</em>
 </p>
 
-*2 m temperature from Aurora fine-tuned on HRES-T0. Init 2022-06-15T12.  
-Forecast maps and numbers in this repo are from this project’s pipeline, not Microsoft or the Aurora authors, unless a figure is cited from the paper.*  
+---
 
-This repository contains a self-hosted inference service for the open-sourced Aurora model by Microsoft Research. The model was first released in June 2024, followed by its associated Nature article in October 2025. The links to official GitHub, Hugging Face repositories, and follow-up paper, are found below.
+## Results
 
-[Aurora: A Foundation Model for the Earth System](https://github.com/microsoft/aurora)  
-[Hugging Face Repository for Aurora](https://huggingface.co/microsoft/aurora)  
-[Aurora 1.5, follow-up paper](https://www.microsoft.com/en-us/research/publication/aurora-1-5-fine-tuning-a-foundation-model-for-medium-range-ensemble-weather-prediction/)
+**Hardware:** Single NVIDIA A100-SXM4-40GB  
+**Software:** Microsoft-Aurora `1.8.0` · PyTorch `2.12.1+cu130` · CUDA `runtime 13.0`
 
-## Why this project
+| Variant | What is cast | s / step | Peak VRAM (GiB) | Δ RMSE vs baseline, z500 | Δ RMSE vs baseline, t850 | Δ RMSE vs baseline, 2t | n |
+|---|---|---|---|---|---|---|---|
+| `fp32` (baseline) | matmul TF32 off (`highest`); cuDNN TF32 default-on | ~6.3 | ~27.1 | 0 (bitwise) | 0 (bitwise) | 0 (bitwise) | 6 |
+| `tf32` | matmul + cuDNN | `[X]` | `[X]` | `[X]` | `[X]` | `[X]` | 30 |
+| `bf16-autocast` | backbone only (encoder/decoder stay fp32) | `[X]` | `[X]` | `[X]` | `[X]` | `[X]` | 30 |
 
-The project scope is a self-hosted engineering project based on an open-sourced foundation model, focusing on building towards a serving and inference optimisation layer. This is a deliberate bounded scope that emphasises core ML engineering skills whilst keeping costs low.
+`fp32` s/step and peak VRAM are measured on this A100. Bitwise Δ RMSE is the **n=6** Q2 screen vs the headline archive (`6 × 40 × 8` = 1 920 zeros), not an n=30 confirm. `tf32` / `bf16-autocast` cells stay empty until Stage 3; their `n=30` is the planned confirm size.
 
-With growing concerns over data privacy, data governance and the overall sovereignty of AI systems, the benefits and ability to self-host one's AI model cannot be overstated. To that end, this project has three goals:
+### Key findings
 
-1. Self-hosting an open-sourced foundation model
-    The checkpoints/weights of the trained foundation model are available on Hugging Face. The goal is to develop an end-to-end deep learning pipeline towards serving inference over an API.
-2. Optimise for inference and understand trade-offs in performance
-    Based on recent issues described on the official repository, there remains possible outstanding optimisations that can be performed on the model. The papers emphasise model architecture details and model fine-tuning whilst the official kit offer optimised options.
-    Whilst such optimisation techniques are common across deep learning models, to the best of my knowledge, there are no documented results on the trade-offs in Aurora's performance associated with these techniques.
-    *i.e., how far can inference engineering be pushed before forecast quality suffers*. While learning to apply these techniques, I aim to document these trade-offs in this repository.
-3. Whilst fine-tuning models is an important step in the development and deployment of deep learning models, I have deliberately chosen to exclude fine-tuning from this project to keep costs low and feedback loops short.
+- `[Finding 1]`
+- `[Finding 2]`
 
-## Current stage: Stage 1
+### Figures
 
-Stage 1 involves building a reproducible pipeline that ingests HRES_T0 analysis data into a weather foundation model to produce real out-of-sample global forecasts.
+<_insert figure of overlapping RMSE plots of variants vs baseline_>
 
-Objectives included, but are not limited to the following:
-1. Identify a reported performance metric from the papers
-2. Create a data seam for the HRES_T0 data source from the WeatherBench2 benchmark Google Cloud Storage, called HresTOSource
-3. Create a data seam for the associated static variables (lat-lon coordinates .etc) stored in the HuggingFace repository
-4. Create a script to perform a toy single forecast (single-step inference) on a CPU
-  - Uses a trimmed feature set
-5. Create a script to perform a toy rollout forecast (autoregressive inference) on a CPU
-  - Uses a trimmed feature set
-6. Create a script to perform a real rollout forecast (autoregressive inference) on a GPU
-  - Uses a full feature set
-7. Create the GPU stage for the Dockerfile to run a real rollout forecast
-8. Complete a full setup-inference-teardown cycle 
-9. Write associate integration and unit tests for the above
+---
 
-## Quickstart
+## Can we trust the baseline?
 
-### Prerequisites
+Before measuring precision trade-offs, the codebase was validated against the benchmark performance reported by [WeatherBench2](https://weatherbench2.readthedocs.io/) (Rasp et al., 2024).
 
-Python 3.12 and [uv](https://docs.astral.sh/uv/) are required for the quality gate. The Stage 1 forecast map is produced on a GPU: Docker with NVIDIA Container Toolkit (`--gpus all`), or a host with CUDA and `uv sync --extra forecast`.
+### Matched Out-Sample Performance
 
-Make targets are defined in the `Makefile`. The default `PLATFORM` is `linux/arm64` (Apple Silicon / GH200). On x86_64 cloud GPUs (A10 / A100 / H100) pass `PLATFORM=linux/amd64` or the image will fail with `exec format error`.
+<p align="center">
+  <img src="docs/images/baseline_30inits_rmse_vs_lead_time.png" alt="Headline RMSE vs lead: this pipeline n=30 vs WeatherBench2 n=730" width="720"/>
+</p>
 
-### Clone and quality gate
+<em>Headline RMSE vs lead time. WeatherBench2 Aurora vs HRES-T0 (n=730) overlaid with this pipeline’s Q1 skill run (n=30), 2022.</em>
 
-```sh
-git clone https://github.com/xerxeschongxian26/ms_aurora_portfolio.git
-cd ms_aurora_portfolio
-make install
-make check
-make test-slow
-```
+- **8 headline variables** (z500, t850, 2t, 10u, msl, u500, t500, q500), n=30 inits from 2022 (held out from training), within 5% of the WB2 n=730 reference at all lead times up to and including day 10.
 
-`make install` syncs the lockfile with the `dev` extra. `make check` runs Ruff, mypy, the fast pytest suite (fixtures only, no network), and a format check. `make test-slow` loads the pinned small checkpoint from Hugging Face (first run downloads into `~/.cache/huggingface`).
+### Bitwise Reproducibility
+- **Baseline floor (Q2 screen, n=6):** `fp32-baseline` vs the saved headline maps scored RMSE **0** on **1 920 / 1 920** rows (`6 × 40 × 8` headline slices). That is the Q2 wiring floor on this A100, not skill vs HRES-T0, and **not** an n=30 confirm of fp32 vs itself. Pairing uses persist `init_id` by `init_time` (spread ids 1, 6, 15, 16, 22, 24), not screen ordinal 1..6. Protocol: [`docs/benchmark-target.md`](docs/benchmark-target.md).
 
-### GPU forecast (HRES-T0 → Aurora 0.25° FT)
+## Method
 
-This is the Stage 1 entrypoint: `scripts/real_forecast.py` loads WB2 HRES-T0, runs `run_rollout` on `aurora-finetuned`, and writes one global `2t` PNG per step. Init time is `2022-06-15T12`. The script exits if CUDA is unavailable.
+| | Detail |
+|---|---|
+| **Model** | `microsoft/aurora` 0.25° fine-tuned (`aurora-0.25-finetuned.ckpt` @ [`0be7e57`](https://huggingface.co/microsoft/aurora/commit/0be7e57)) |
+| **Data** | WB2 HRES-T0 analysis, 2022 out-of-sample period, 00/12 UTC inits only. A hole is a store time with non-finite values; any window that touches [`configs/hres_t0_outsample_holes.csv`](configs/hres_t0_outsample_holes.csv) is skipped, not imputed. |
+| **Metric** | Latitude-weighted RMSE (`cos(lat)` weights normalised to unit mean; WB2 / Aurora Supp. F, eq. F14) in `aurora_inference.evaluation.metrics.MSE`. No ACC. Runtime `src/` does not import `weatherbench2`. |
+| **What is cast** | Stage 2 ships `fp32-baseline` only (`float32_matmul_precision="highest"`; `cudnn.allow_tf32` unset). `bf16-autocast` (`Aurora(autocast=True)`, backbone only) and `tf32` (`float32_matmul_precision="high"`) stay unmeasured until Stage 3. |
+| **Hardware** | Single NVIDIA A100-SXM4-40GB, PyTorch `2.12.1+cu130`, CUDA `runtime 13.0` |
+| **Init sets** | Q1 skill: n=30 year-spread ([`configs/hres_t0_2022_spread_rollout.toml`](configs/hres_t0_2022_spread_rollout.toml)). Q2 screen: n=6 ([`configs/hres_t0_2022_fidelity_screen_rollout.toml`](configs/hres_t0_2022_fidelity_screen_rollout.toml)). Public Q2 RMSE later requires the n=30 confirm. |
 
-The GPU image does not bake in checkpoints. Hugging Face weights are cached on the host and mounted at run time. The run needs network for the public HRES-T0 zarr on GCS and, on a cache miss, the fine-tuned checkpoint.
+- Screen inits: one per named month (Jan / Apr / Jul / Oct) plus European heat-dome `2022-07-18T12` and Hurricane Ian `2022-09-27T00`.
+- Timings: CUDA Events after a 3-step warm-up. Memory: `torch.cuda.max_memory_allocated` (~27.1 GiB allocated; ~37.6 GiB reserved).
+- **GPU spend (Stage 2).** Two terminated A100-SXM4-40GB sessions: persist n=30 (`scripts/save_baseline_forecasts.py`, ~4.6 h) and Q2 screen n=6 (`scripts/run_fidelity.py`, ~0.64 h). Console $/hr was not recorded at booking. NFS still bills splice ~228 GiB + headline archive ~32 GiB at ~$0.20/GiB-month until those volumes are deleted.
 
-```sh
-make docker-build-gpu PLATFORM=linux/amd64
-mkdir -p outputs
-docker run --gpus all \
-  -e HF_HOME=/cache/huggingface \
-  -v "$HOME/.cache/huggingface:/cache/huggingface" \
-  -v "$(pwd)/outputs:/app/outputs" \
-  --rm \
-  --platform linux/amd64 \
-  aurora-inference:gpu-linux-amd64
-```
+---
 
-`make docker-run-gpu PLATFORM=linux/amd64` is the same run **without** an outputs mount. The Makefile uses `--rm`, so maps written under `/app/outputs` are deleted with the container unless you bind-mount `outputs/` as above.
+## Limitations
 
-On success the logs include a forecast-skill banner and rollout wall time. PNGs land in `outputs/real_forecast_2t_stepNN.png` (gitignored). The banner image in this README is one of those maps.
-
-Without Docker, on a CUDA host:
-
-```sh
-uv sync --extra forecast --frozen
-python scripts/real_forecast.py --steps 4
-```
-
-### CPU plumbing (optional)
-
-The CPU image runs `scripts/synthetic_forward.py`: `AuroraSmallPretrained` on a synthetic 32×64 batch. Output has no forecast skill.
-
-```sh
-make docker-build PLATFORM=linux/amd64
-make docker-run PLATFORM=linux/amd64
-```
-
-Omit `PLATFORM=...` on `linux/arm64` hosts. Expect a `NO FORECAST SKILL` banner and shape / timing lines on stdout; this path does not write PNGs.
-
-## Architecture
-
-### Data Source Boundary
-
-```mermaid
-flowchart LR
-  A[synthetic_forward] --> B[SyntheticSource.load] --> C[Batch]
-```
-
-- **synthetic_forward** — Runs a CPU forward pass using AuroraSmallPretrained on synthetic data (no forecast skill)
-- **SyntheticSource** — A dataclass with the method `.load()` that generates a contractually correct `Batch` type input
-- **Batch** — A dataclass shipped with the aurora library that stores the input features and which the model expects as an input
-
-### Model Input Contract Validation
-
-```mermaid
-flowchart LR
-  A[validate_input_times] --> B[Batch] --> C[validate_batch]
-```
-
-- **validate_input_times** — Runs inside every `BatchSource.load()`; checks t1 is exactly 6 hours ahead of t0
-- **Batch** — The dataclass object being checked; configured contents must match `ModelSpec` / `AURORA_PRETRAINED_SPEC` before a forward pass is allowed
-- **validate_batch** — Runs immediately before `model.forward()`; checks keys, shapes, coords, dtype/finite
-
-### Model Checkpoint Loading
-
-```mermaid
-flowchart LR
-  E[load_model] --> A[resolve_checkpoint] --> B[_require_pinned_revision] --> C[load_checkpoint] --> D[model.eval]
-```
-
-- **load_model** — Public entrypoint; orchestrates checkpoint resolution, pin enforcement, loading, and eval-mode setup
-- **resolve_checkpoint** — Looks up `model_name` in `CHECKPOINT_REGISTRY`; resolves the HuggingFace repo, filename, and default revision
-- **_require_pinned_revision** — Rejects `""`, `"main"`, `"master"`; the revision must be a pinned commit SHA (ADR 0003)
-- **load_checkpoint** — Downloads the checkpoint from HuggingFace into a local cache and loads it into the model
-- **model.eval** — Puts the model in eval mode and moves it to the target device before returning
+- **n=30** for Q1 skill, not the supplementary information's full 730-init out-sample protocol
+- Bitwise 1 920 is the **n=6** screen, not an n=30 fp32-vs-itself confirm
+- Single GPU — A100-SXM4-40GB
+- RMSE on _headline variables_ only — no ACC, no extreme-event metrics
+- Deterministic model only (not Aurora 1.5 ENS)
+---
 
 ## Roadmap
 
-### Stage 0 — Scaffolding and Foundations
+| Stage | Focus | Status |
+|---|---|---|
+| 0 | Environment, Docker, dependencies | ✅ Done |
+| 1 | Forecast pipeline — end-to-end inference | ✅ Done |
+| 2 | Evaluation harness — Q1 skill + Q2 fidelity wiring | ✅ Done |
+| 3 | **Inference optimisation** — mixed precision, then batching only if peak VRAM drops; optional PTQ | 🔧 In progress |
+| 4 | Report, figures, optional extended evaluation | 📝 Planned |
+| 5 | **Inference serving** — one init in, forecast out | 📝 Planned |
 
-Stage 0 involves building the scaffolding for the project.
+Stage 3 is gated, not a checklist: (1) `tf32` and `bf16-autocast` vs the saved fp32 maps; (2) `B>1` **only if** mixed precision actually lowers peak VRAM on this A100 40GB (fp32 already OOMs at `B=2`); (3) hand-rolled post-training quantisation is an **appendix**, not a gate. Then Stage 4 write-up and Stage 5 serving with the cheapest variant that stayed inside the RMSE budget.
 
-Repo tooling and CI; locked deps with uv; Batch input contract + tests; synthetic batches for CPU toy inference; CPU Docker for local/remote; remote setup/teardown rehearsal via the GPU playbook. No connection to ERA5, no served API, no skill metrics.
+## Contributions to upstream
 
-Objectives included, but are not limited to the following:
-1. Set up the repository with pre-commit hooks and Continuous Integration (CI) best practices
-2. Locking dependencies using uv, a modern package manager, to enforce reproducibility
-3. Define the contract for the model inputs and its associated tests
-4. Create synthetic batches to run toy inferences on CPUs only
-5. Create Docker files to build images and support runs on local and remote instances
-6. Create Docker file that supports dual-architectures (linux/arm64 and linux/amd64)
-7. Trial running the sequence of setup and tear down on a remote instance
+[PR #196](https://github.com/microsoft/aurora/pull/196): **Fix silent metadata–tensor shape mismatch in `Batch`** — merged into `microsoft/aurora`. Added post-init validation that catches mismatched time and pressure-level dimensions before they propagate silently through the model. Discovered via Issue [#188](https://github.com/microsoft/aurora/issues/188) during this work.
 
-### Stage 1 — Real forecast pipeline - WIP
+## Acknowledgements and Sources
 
-Stage 1 involves building a reproducible pipeline that ingests HRES_T0 analysis data into a weather foundation model to produce real out-of-sample global forecasts.
+**Aurora** (Bodnar et al., 2024)
+- [Code](https://github.com/microsoft/aurora) · [Weights](https://huggingface.co/microsoft/aurora) · [Docs](https://microsoft.github.io/aurora/intro.html)
+- [Paper](https://www.nature.com/articles/s41586-025-09005-y)
+- [Supplementary Information](https://www.nature.com/articles/s41586-025-09005-y#Sec29)
+- [Aurora 1.5, an update](https://www.microsoft.com/en-us/research/publication/aurora-1-5-fine-tuning-a-foundation-model-for-medium-range-ensemble-weather-prediction/)
 
-Objectives included, but are not limited to the following:
-1. Identify a reported performance metric from the papers
-2. Create a data seam for the HRES_T0 data source from the WeatherBench2 benchmark Google Cloud Storage, called HresTOSource
-3. Create a data seam for the associated static variables (lat-lon coordinates .etc) stored in the HuggingFace repository
-4. Create a script to perform a toy single forecast (single-step inference) on a CPU
-  - Uses a synthetic feature set
-5. Create a script to perform a toy rollout forecast (autoregressive inference) on a CPU
-  - Uses a trimmed feature set
-6. Create a script to perform a real rollout forecast (autoregressive inference) on a GPU
-  - Uses a full feature set
-7. Create the GPU stage for the Dockerfile to run a real rollout forecast
-8. Complete a full setup-inference-teardown cycle 
-9. Write associate integration and unit tests for the above
+**WeatherBench 2** (Rasp et al., 2024)
+- [Paper](https://doi.org/10.1029/2023MS004019)
+- [Docs](https://weatherbench2.readthedocs.io/)
+- [Aurora vs HRES-T0, 2022](https://storage.googleapis.com/weatherbench2/benchmark_results/aurora_vs_hres_t0_1440x721_2022.nc)
 
-### Stage 2 — Measured baseline - Upcoming
-
-Build an evaluation harness measuring, establishing and confirming a baseline skill for the model
-
-### Stage 3 — Served & observable - Upcoming
-
-Deploy the model as a monitored FastAPI inference service with latency/throughput/memory instrumentation
-
-### Stage 4 — Optimized with a measured frontier - Upcoming
-
-Optimise foundation-model inference
-
-### Stage 5 — Depth, breadth & writeup - Upcoming
-
-Write-up
-
-## Personal Project Development Notes
-
-### Background
-Weather forecasting techniques have been in development since the early 1920s and the availability of compute resources and better modelling of the complex physics governing our Earth's system have improved the accuracy and size of the forecast window.
-
-Modern weather forecasting techniques rely on classical numerical methods, solving the large systems of equations, one small increment at a time, repeated across various initial conditions, in order to arrive at a distribution of forecasts for the Earth system. This computationally expensive number crunching process is made possible only by the availablilty of supercomputing resources.
-
-With the resurgence of deep neural networks and the explosion of computing resources, sufficiently trained deep learning models have made continued progress in demonstrating the ability to replace this computationally expensive step, driving down the cost of forecasting whilst improving forecasts. The Aurora weather foundation model by Microsoft Research is one of the latest in the line of AI weather forecasting models which include GenCast and GraphCast (Google DeepMind), Pangu-Weather (Huawei Cloud), FourCastNet (Nvidia), AIFS (European Centre for Medium-Range Weather Forecast), amongst others.
-
-### Models, Architecture and Mathematical Logic
-- The Aurora models appears to consists of smaller sub models for predicting air pollutions (particulate concentration), wave dynamics and of course, weather. Sub categories are also trained at different spacial resolutions
-- The core architecture is a Swin Transformer and Perceiver
-- The models are all pretrained and are available in a full and small version. The full version requires 40GB of memory, 5GB of which consists of the weights. This is approximately the capacity of an entry level enterprise GPU such as the NVIDIA RTX H100
-- The smaller pretrained versions are provided for debugging purposes. It's input and output signatures (i.e. the shape of the heterogenous inputs and outputs) are identical to the full model but differ only in the complexity of the architectures, which consists of less layers and possibly a simpler architecture
-- Input Time Step - t-1, and t
-- Output time step - t + 1
-- The input and output time steps resembles a 2nd order Markov property, despite classical numerical methods assuming a 1st order Markov
-Property
-### Data, Data Sources and Data Integrity
-- Input data are heterogenous and unnormalised when fed into the network. Normalisation occurs inside the model
-- The Batch and Metadata data classes are custom data classes that are part of the Aurora package
-- Both the input and output are of the custom dataclass type Batch
-
-### Ideas
-- Demonstrate the ability to predict the cyclone path (and state?) for the recent Hurricane Melissa (Oct. 2025)
+Links last accessed 18 September 2026.
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
