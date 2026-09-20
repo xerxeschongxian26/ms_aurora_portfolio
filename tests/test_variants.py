@@ -9,10 +9,13 @@ from conftest import make_valid_batch
 
 from aurora_inference.contract import AURORA_PRETRAINED_SPEC
 from aurora_inference.evaluation.variants import (
+    CUDA_ONLY_VARIANTS,
+    PRECISION_VARIANT_NAMES,
     VARIANTS,
     VariantConfig,
     _cast_weather_tensors,
     _convert_incoming_batch_to_param_dtype,
+    build_debug_variant,
 )
 from aurora_inference.inference.forward import run_rollout
 
@@ -107,3 +110,16 @@ def test_weight_converted_debug_model_accepts_fp32_batch() -> None:
         predictions = run_rollout(model, batch, steps=1, check_finite=False)
         assert next(iter(predictions[0].surf_vars.values())).dtype == torch.float32
         assert predictions[0].metadata.lat.dtype == torch.float32
+
+
+def test_precision_variant_names_match_registry() -> None:
+    assert set(PRECISION_VARIANT_NAMES) == set(VARIANTS) - {"fp32-baseline"}
+    assert set(CUDA_ONLY_VARIANTS) == {"bf16-amp-full", "fp16-weights-amp"}
+
+
+def test_apply_variant_precision_cuda_only_refuses_on_cpu() -> None:
+    batch = make_valid_batch()
+    for name in CUDA_ONLY_VARIANTS:
+        model = build_debug_variant(name)
+        with pytest.raises(RuntimeError, match="refusing to silently run in FP32"):
+            run_rollout(model, batch, steps=1, check_finite=False)

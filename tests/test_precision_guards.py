@@ -24,6 +24,7 @@ from aurora_inference.inference.forward import (
     check_prediction_finite,
     finalize_rollout_predictions,
 )
+from aurora_inference.runlog import ObservedModuleDType
 
 
 def test_fake_noop_variant_is_suspect() -> None:
@@ -86,3 +87,36 @@ def test_finalize_after_timer_still_guards() -> None:
     assert next(iter(stored[0].surf_vars.values())).dtype == torch.float32
     with pytest.raises(NonFinitePredictionError, match="msl"):
         finalize_rollout_predictions([finite, exploding], init_time=init_time)
+
+
+def test_backbone_only_dvo_counts_reduced_layernorm() -> None:
+    """Autocast can leave the backbone wrapper in FP32; inner LayerNorm is the signal."""
+    model = nn.Linear(2, 2)
+    observations = [
+        ObservedModuleDType(module="encoder", input_dtype="fp32", output_dtype="fp32"),
+        ObservedModuleDType(module="backbone", input_dtype="fp32", output_dtype="fp32"),
+        ObservedModuleDType(
+            module="layernorm",
+            input_dtype="bf16",
+            output_dtype="bf16",
+            qualified_name="backbone.encoder_layers.0.blocks.0.norm1.ln",
+        ),
+        ObservedModuleDType(module="decoder", input_dtype="fp32", output_dtype="fp32"),
+    ]
+    assert (
+        check_declared_versus_observed(VARIANTS["bf16-amp-backbone"], model, observations) == "PASS"
+    )
+
+
+def test_backbone_only_dvo_rejects_reduced_encoder_layernorm() -> None:
+    model = nn.Linear(2, 2)
+    observations = [
+        ObservedModuleDType(
+            module="layernorm",
+            input_dtype="bf16",
+            output_dtype="bf16",
+            qualified_name="encoder.surf_norm",
+        )
+    ]
+    with pytest.raises(DeclaredObservedMismatchError, match="scope"):
+        check_declared_versus_observed(VARIANTS["bf16-amp-backbone"], model, observations)

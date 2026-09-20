@@ -203,13 +203,28 @@ def _expected_reduced_boundaries(variant: VariantConfig) -> set[str]:
 
 
 def _observed_reduced_boundaries(observations: Sequence[ObservedModuleDType]) -> set[str]:
+    """Regions whose wrapper *or* LayerNorm tensors were 16-bit.
+
+    Autocast often leaves the backbone module's incoming tensor in FP32 and
+    casts inside. LayerNorm is the hooked op that actually sees the reduced
+    width, so it counts toward ``scope``.
+    """
     reduced: set[str] = set()
     for observation in observations:
-        if observation.module not in _BOUNDARY_MODULES:
+        region = _region_for_observation(observation)
+        if region not in _BOUNDARY_MODULES:
             continue
         if observation.input_dtype in _REDUCED_NAMES or observation.output_dtype in _REDUCED_NAMES:
-            reduced.add(observation.module)
+            reduced.add(region)
     return reduced
+
+
+def _region_for_observation(observation: ObservedModuleDType) -> str:
+    if observation.module in _BOUNDARY_MODULES:
+        return observation.module
+    if observation.module == "layernorm" and observation.qualified_name:
+        return observation.qualified_name.split(".", 1)[0]
+    return observation.module
 
 
 def _first_tensor_dtype(value: object) -> torch.dtype | None:

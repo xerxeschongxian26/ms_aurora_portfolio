@@ -14,12 +14,14 @@ from dataclasses import dataclass
 from typing import Literal, get_args
 
 import torch
-from aurora import Aurora, Batch
+from aurora import Aurora, AuroraSmallPretrained, Batch
 
 from aurora_inference.contract import AURORA_PRETRAINED_SPEC, ModelSpec
 from aurora_inference.model.loader import load_model
 
 __all__ = [
+    "CUDA_ONLY_VARIANTS",
+    "PRECISION_VARIANT_NAMES",
     "VARIANTS",
     "VariantConfig",
     "Accumulator",
@@ -27,6 +29,8 @@ __all__ = [
     "PrecisionScope",
     "ReductionOps",
     "WeightsDType",
+    "apply_variant_precision",
+    "build_debug_variant",
 ]
 
 WeightsDType = Literal["fp32", "bf16", "fp16"]
@@ -42,6 +46,15 @@ _REDUCTION_OPS = frozenset(get_args(ReductionOps))
 _SCOPES = frozenset(get_args(PrecisionScope))
 _WEIGHT_CONVERTED = frozenset({"bf16", "fp16"})
 _WEIGHT_CONVERTED_REDUCTIONS = frozenset({"ambient", "fp32-pinned-partial"})
+PRECISION_VARIANT_NAMES: tuple[str, ...] = (
+    "tf32-matmul",
+    "bf16-amp-backbone",
+    "bf16-amp-full",
+    "bf16-weights",
+    "fp16-weights",
+    "fp16-weights-amp",
+)
+CUDA_ONLY_VARIANTS: frozenset[str] = frozenset({"bf16-amp-full", "fp16-weights-amp"})
 
 
 @dataclass(frozen=True)
@@ -154,51 +167,83 @@ def _isolate_leftover_fp32_matmul() -> None:
     torch.set_float32_matmul_precision("highest")
 
 
+def apply_variant_precision(model: Aurora, variant_name: str) -> Aurora:
+    """Apply one variant's precision settings to an already-built model.
+
+    Production factories load ``aurora-finetuned`` then call this. Laptop dry-runs
+    use the same helper on ``AuroraSmallPretrained`` so WP2.1 never downloads
+    the fine-tuned checkpoint. CUDA-only AMP wrappers still refuse at forward
+    rather than silently running FP32.
+    """
+    if variant_name == "fp32-baseline":
+        _isolate_leftover_fp32_matmul()
+        return model
+    if variant_name == "tf32-matmul":
+        torch.set_float32_matmul_precision("high")
+        return model
+    if variant_name == "bf16-amp-backbone":
+        _isolate_leftover_fp32_matmul()
+        model.autocast = True
+        return model
+    if variant_name == "bf16-amp-full":
+        _isolate_leftover_fp32_matmul()
+        return _wrap_forward_in_autocast(model, dtype=torch.bfloat16)
+    if variant_name == "bf16-weights":
+        # microsoft-aurora==1.8.0 remaps Aurora(bf16_mode=True) to backbone autocast.
+        # Issue #127 is about converting resident weights; do that in place.
+        _isolate_leftover_fp32_matmul()
+        model = model.to(dtype=torch.bfloat16)
+        return _convert_incoming_batch_to_param_dtype(model)
+    if variant_name == "fp16-weights":
+        _isolate_leftover_fp32_matmul()
+        model.half()
+        return _convert_incoming_batch_to_param_dtype(model)
+    if variant_name == "fp16-weights-amp":
+        _isolate_leftover_fp32_matmul()
+        model.half()
+        model = _convert_incoming_batch_to_param_dtype(model)
+        return _wrap_forward_in_autocast(model, dtype=torch.float16)
+    msg = f"unknown variant {variant_name!r}"
+    raise KeyError(msg)
+
+
+def build_debug_variant(variant_name: str) -> Aurora:
+    """Untrained ``AuroraSmallPretrained`` with the named variant's precision applied.
+
+    Plumbing only — untrained weights emit NaNs. Callers must pass
+    ``check_finite=False`` into rollout. Not a skill path.
+    """
+    model = AuroraSmallPretrained()
+    model.eval()
+    return apply_variant_precision(model, variant_name)
+
+
 def _fp32_baseline_factory() -> Aurora:
-    _isolate_leftover_fp32_matmul()
-    return load_model("aurora-finetuned")
+    return apply_variant_precision(load_model("aurora-finetuned"), "fp32-baseline")
 
 
 def _tf32_matmul_factory() -> Aurora:
-    torch.set_float32_matmul_precision("high")
-    return load_model("aurora-finetuned")
+    return apply_variant_precision(load_model("aurora-finetuned"), "tf32-matmul")
 
 
 def _bf16_amp_backbone_factory() -> Aurora:
-    _isolate_leftover_fp32_matmul()
-    model = load_model("aurora-finetuned")
-    model.autocast = True
-    return model
+    return apply_variant_precision(load_model("aurora-finetuned"), "bf16-amp-backbone")
 
 
 def _bf16_amp_full_factory() -> Aurora:
-    _isolate_leftover_fp32_matmul()
-    model = load_model("aurora-finetuned")
-    return _wrap_forward_in_autocast(model, dtype=torch.bfloat16)
+    return apply_variant_precision(load_model("aurora-finetuned"), "bf16-amp-full")
 
 
 def _bf16_weights_factory() -> Aurora:
-    # microsoft-aurora==1.8.0 remaps Aurora(bf16_mode=True) to backbone autocast.
-    # Issue #127 is about converting resident weights; do that in place.
-    _isolate_leftover_fp32_matmul()
-    model = load_model("aurora-finetuned")
-    model = model.to(dtype=torch.bfloat16)
-    return _convert_incoming_batch_to_param_dtype(model)
+    return apply_variant_precision(load_model("aurora-finetuned"), "bf16-weights")
 
 
 def _fp16_weights_factory() -> Aurora:
-    _isolate_leftover_fp32_matmul()
-    model = load_model("aurora-finetuned")
-    model.half()
-    return _convert_incoming_batch_to_param_dtype(model)
+    return apply_variant_precision(load_model("aurora-finetuned"), "fp16-weights")
 
 
 def _fp16_weights_amp_factory() -> Aurora:
-    _isolate_leftover_fp32_matmul()
-    model = load_model("aurora-finetuned")
-    model.half()
-    model = _convert_incoming_batch_to_param_dtype(model)
-    return _wrap_forward_in_autocast(model, dtype=torch.float16)
+    return apply_variant_precision(load_model("aurora-finetuned"), "fp16-weights-amp")
 
 
 VARIANTS: dict[str, VariantConfig] = {
