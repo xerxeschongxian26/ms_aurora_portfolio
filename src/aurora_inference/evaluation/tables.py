@@ -7,10 +7,22 @@ from typing import Any, cast
 
 import pandas as pd
 
-__all__ = ["load_rmse_rows", "write_rmse_tables"]
+__all__ = ["load_rmse_rows", "relative_change", "write_rmse_tables"]
 
 PER_INIT_NAME = "rmse_by_init.csv"
 MEAN_BY_LEAD_NAME = "rmse_by_lead.csv"
+
+
+def relative_change(old: float, new: float) -> float:
+    """``|new - old| / |old|``, or ``/ |new|`` if ``old`` is zero.
+
+    Both zero is a 0.0 change (the Stage 2 floor). Used by the WP2.3 archive
+    re-score abort check, not as a public pass band.
+    """
+    if old == 0.0 and new == 0.0:
+        return 0.0
+    scale = abs(old) if old != 0.0 else abs(new)
+    return abs(new - old) / scale
 
 
 def load_rmse_rows(output_dir: Path) -> list[dict[str, Any]]:

@@ -18,6 +18,7 @@ from aurora_inference.data.hres_t0 import (
     _read_zarr_array,
 )
 from aurora_inference.evaluation.metrics import MSE
+from aurora_inference.inference.forward import cast_prediction_to_fp32
 
 __all__ = [
     "align_truth_to_forecast",
@@ -48,7 +49,12 @@ def _scalar(value: object) -> float:
 
 
 def batch_to_dataset(batch: Batch) -> xr.Dataset:
-    """T=1 (or last time index) weather fields as an ``xr.Dataset``, lat increasing."""
+    """T=1 (or last time index) weather fields as an ``xr.Dataset``, lat increasing.
+
+    Weather tensors are copied to FP32 first so 16-bit / bfloat16 predictions
+    do not reach numpy (which cannot round-trip bfloat16) or zarr.
+    """
+    batch = cast_prediction_to_fp32(batch)
     lat = np.asarray(batch.metadata.lat.detach().cpu().numpy(), dtype=np.float32)
     lon = np.asarray(batch.metadata.lon.detach().cpu().numpy(), dtype=np.float32)
     levels = [int(level) for level in batch.metadata.atmos_levels]

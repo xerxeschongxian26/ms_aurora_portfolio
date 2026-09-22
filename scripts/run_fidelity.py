@@ -9,7 +9,9 @@ not skill — do not quote those RMSEs.
 GPU campaign: roll a named ``VARIANTS`` entry on a rollout TOML, score each
 lead against the WP5b **headline** archive (RMSE vs baseline) and HRES-T0
 (RMSE vs truth). Pair ``(init_id, lead_hours)`` using persist ``init_time``,
-not the screen TOML's 1..6 re-index.
+not the screen TOML's 1..6 re-index. ``--max-steps`` truncates the TOML
+``n_rollout_steps`` without editing the frozen schedule; leftover archive
+leads are unused, not missing.
 
 Example::
 
@@ -19,7 +21,8 @@ Example::
     uv run --extra forecast python scripts/run_fidelity.py \\
         --baseline-dir /path/to/wp5b-baselines-n30-headline \\
         --rollout-config configs/hres_t0_2022_fidelity_screen_rollout.toml \\
-        --output-dir /path/to/nfs/aurora-fidelity --tag screen-fp32
+        --output-dir /path/to/nfs/aurora-fidelity --tag screen-fp32 \\
+        --max-steps 10
 """
 
 from __future__ import annotations
@@ -64,19 +67,32 @@ from aurora_inference.evaluation.evaluation_schedule import (
 )
 from aurora_inference.evaluation.fidelity import compute_rmse_score_variant_vs_baseline
 from aurora_inference.evaluation.grids import analysis_dataset, as_naive_datetime, batch_to_dataset
+from aurora_inference.evaluation.precision import (
+    DeclaredObservedMismatchError,
+    check_declared_versus_observed,
+    declared_precision,
+    install_dtype_hooks,
+    inverted_zero_verdict,
+)
 from aurora_inference.evaluation.tables import load_rmse_rows, write_rmse_tables
 from aurora_inference.evaluation.variants import VARIANTS, VariantConfig
-from aurora_inference.inference.forward import run_rollout
+from aurora_inference.inference.forward import (
+    NonFinitePredictionError,
+    finalize_rollout_predictions,
+    run_rollout,
+)
 from aurora_inference.logging import configure_run_logging, normalize_run_tag, run_artifact_dir
 from aurora_inference.model.loader import load_model
 from aurora_inference.runlog import (
     MemoryRecord,
+    ObservedModuleDType,
     RunIdentity,
     RunLog,
     TimingRecord,
     checksums_for_pred,
     collect_env,
     measure_cuda_elapsed_ms,
+    read_attention_routine,
     reset_vram_peak,
     snapshot_memory,
     write_run_log,
@@ -151,7 +167,24 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=None,
         help="cap unique inits after the TOML schedule (GPU smoke; default: all)",
     )
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=None,
+        help="cap rollout steps after the TOML n_rollout_steps (GPU campaign; default: all)",
+    )
     return parser.parse_args(argv)
+
+
+def _capped_rollout_steps(scheduled: int, max_steps: int | None) -> int:
+    """Return the TOML step count, truncated by ``--max-steps`` when set.
+
+    Does not extend a campaign: ``max_steps`` above ``scheduled`` still returns
+    ``scheduled``. Unused archive leads past the cap are left unread.
+    """
+    if max_steps is None:
+        return scheduled
+    return min(scheduled, max_steps)
 
 
 def _lookup_variant(name: str) -> VariantConfig | None:
@@ -159,12 +192,17 @@ def _lookup_variant(name: str) -> VariantConfig | None:
 
 
 def _apply_cpu_hygiene() -> None:
-    """Set the baseline flags that exist on CPU. GPU flags wait for the CUDA path."""
+    """Baseline dry-run only. GPU variants pin this flag in their own factory."""
     torch.set_float32_matmul_precision("highest")
 
 
 def _apply_gpu_hygiene() -> None:
-    torch.set_float32_matmul_precision("highest")
+    """GPU flags that are not variant-specific.
+
+    Do not set ``float32_matmul_precision`` here. That flag is owned by each
+    variant factory so ``tf32-matmul`` is not overwritten and cannot leak into
+    a later in-process variant.
+    """
     if torch.cuda.is_available():
         torch.backends.cudnn.benchmark = True
 
@@ -296,13 +334,22 @@ def _run_cpu_dry_run(*, variant: VariantConfig, output_dir: Path) -> int:
 
     def _rollout(label: str) -> tuple[list[Batch], float]:
         started = time.perf_counter()
-        preds = run_rollout(model, batch, steps=_DRY_RUN_STEPS)
+        preds = run_rollout(model, batch, steps=_DRY_RUN_STEPS, init_time=_DRY_RUN_INIT)
         elapsed_s = time.perf_counter() - started
         _LOG.info("%s rollout wall time: %.2fs for %d steps", label, elapsed_s, _DRY_RUN_STEPS)
         return preds, elapsed_s
 
+    hooks = install_dtype_hooks(model)
     baseline_preds, _ = _rollout("baseline")
     variant_preds, variant_s = _rollout("variant")
+    try:
+        dvo = check_declared_versus_observed(variant, model, hooks.observations)
+    except DeclaredObservedMismatchError as exc:
+        _LOG.error("%s", exc)
+        hooks.remove()
+        return 1
+    observed_formats = list(hooks.observations)
+    hooks.remove()
 
     rows = _score_variant_vs_baseline(
         variant_preds,
@@ -313,11 +360,16 @@ def _run_cpu_dry_run(*, variant: VariantConfig, output_dir: Path) -> int:
     )
     write_rmse_tables(rows, output_dir)
     max_rmse = _max_rmse(rows)
+    zero_verdict = inverted_zero_verdict(
+        variant_name=variant.name,
+        rmses=[float(row["rmse"]) for row in rows],
+    )
     _LOG.info(
-        "wrote RMSE tables under %s (%s rows, max_rmse=%.4g)",
+        "wrote RMSE tables under %s (%s rows, max_rmse=%.4g, inverted_zero=%s)",
         output_dir,
         len(rows),
         max_rmse,
+        zero_verdict,
     )
 
     checksums = [
@@ -351,6 +403,12 @@ def _run_cpu_dry_run(*, variant: VariantConfig, output_dir: Path) -> int:
             memory=snapshot_memory(_DRY_RUN_DEVICE),
             checksums=checksums,
             max_rmse_variant_vs_baseline=max_rmse,
+            declared_precision=declared_precision(variant),
+            observed_formats=observed_formats,
+            declared_vs_observed=dvo,
+            attention_routine=read_attention_routine(),
+            finiteness_passed=True,
+            inverted_zero_verdict=zero_verdict,
         ),
     )
     _LOG.info("wrote run JSON %s", run_path)
@@ -477,6 +535,7 @@ def _variant_rollout(
     *,
     persist_init_id: int,
     step_hours: int,
+    init_time: datetime,
 ) -> tuple[list[Batch], float, float | None, MemoryRecord]:
     reset_vram_peak(_GPU_DEVICE)
     started = time.perf_counter()
@@ -486,6 +545,9 @@ def _variant_rollout(
             batch,
             steps,
             offload_to_cpu=True,
+            init_time=init_time,
+            check_finite=False,
+            cast_to_fp32=False,
             on_step=_inference_step_logger(
                 f"persist_init_id={persist_init_id} variant",
                 steps,
@@ -497,7 +559,37 @@ def _variant_rollout(
     wall_s = time.perf_counter() - started
     memory = snapshot_memory(_GPU_DEVICE)
     _log_after_rollout(memory, persist_init_id=persist_init_id)
+    # Finite check and FP32 copy are host-side. Inside the CUDA event pair they
+    # stall the next launch and inflate elapsed time vs the Stage 2 baseline.
+    preds = finalize_rollout_predictions(preds, init_time=init_time)
     return preds, wall_s, cuda_ms, memory
+
+
+def _score_init_vs_baseline_archive(
+    preds: list[Batch],
+    *,
+    baseline_dir: Path,
+    persist_init_id: int,
+    init_time: datetime,
+    step_hours: int,
+) -> list[dict[str, Any]]:
+    """Score produced leads only. Extra archive zarrs are unused, not missing."""
+    init_dir = init_forecast_dir(baseline_dir, persist_init_id)
+    rows: list[dict[str, Any]] = []
+    for step_index, pred in enumerate(preds, start=1):
+        lead_hours = step_index * step_hours
+        variant_grid = select_persist_fields(batch_to_dataset(pred), FIELDS_HEADLINE)
+        baseline_grid = read_lead_forecast(lead_zarr_path(init_dir, lead_hours))
+        rows.extend(
+            score_headline_vs_baseline_rows(
+                variant_grid,
+                baseline_grid,
+                init_id=persist_init_id,
+                init_time=init_time,
+                lead_hours=lead_hours,
+            )
+        )
+    return rows
 
 
 def _score_init_against_archive(
@@ -510,22 +602,17 @@ def _score_init_against_archive(
     init_time: datetime,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     step_hours = spec.input_timestep_hours
-    init_dir = init_forecast_dir(baseline_dir, persist_init_id)
-    vs_baseline: list[dict[str, Any]] = []
+    vs_baseline = _score_init_vs_baseline_archive(
+        preds,
+        baseline_dir=baseline_dir,
+        persist_init_id=persist_init_id,
+        init_time=init_time,
+        step_hours=step_hours,
+    )
     vs_truth: list[dict[str, Any]] = []
     for step_index, pred in enumerate(preds, start=1):
         lead_hours = step_index * step_hours
         variant_grid = select_persist_fields(batch_to_dataset(pred), FIELDS_HEADLINE)
-        baseline_grid = read_lead_forecast(lead_zarr_path(init_dir, lead_hours))
-        vs_baseline.extend(
-            score_headline_vs_baseline_rows(
-                variant_grid,
-                baseline_grid,
-                init_id=persist_init_id,
-                init_time=init_time,
-                lead_hours=lead_hours,
-            )
-        )
         valid_time = init_time + timedelta(hours=lead_hours)
         analysis = analysis_dataset(source, valid_time, spec)
         vs_truth.extend(
@@ -544,7 +631,7 @@ def _write_init_run_log(
     output_dir: Path,
     *,
     env: Any,
-    variant_name: str,
+    variant: VariantConfig,
     persist_init_id: int,
     init_time: datetime,
     n_steps: int,
@@ -553,7 +640,12 @@ def _write_init_run_log(
     rollout_ms: float | None,
     preds: list[Batch],
     memory: MemoryRecord,
-    max_rmse_vs_baseline: float,
+    max_rmse_vs_baseline: float | None,
+    observed_formats: list[ObservedModuleDType],
+    declared_vs_observed: str,
+    finiteness_passed: bool,
+    inverted_zero: str | None,
+    warnings: list[str] | None = None,
 ) -> None:
     run_path = output_dir / f"run_init-{persist_init_id}.json"
     write_run_log(
@@ -561,7 +653,7 @@ def _write_init_run_log(
         RunLog(
             env=env,
             run=RunIdentity(
-                variant=variant_name,
+                variant=variant.name,
                 init_id=persist_init_id,
                 init_time=init_time.isoformat(),
                 sku=_sku(_GPU_DEVICE),
@@ -569,7 +661,7 @@ def _write_init_run_log(
                 batch_size=1,
                 n_steps=n_steps,
                 seed=None,
-                model_name=variant_name,
+                model_name=variant.name,
                 offload_to_cpu=True,
                 cpu_dry_run=False,
             ),
@@ -584,7 +676,14 @@ def _write_init_run_log(
                 checksums_for_pred(pred, step=step_index)
                 for step_index, pred in enumerate(preds, start=1)
             ],
+            warnings=[] if warnings is None else warnings,
             max_rmse_variant_vs_baseline=max_rmse_vs_baseline,
+            declared_precision=declared_precision(variant),
+            observed_formats=observed_formats,
+            declared_vs_observed=declared_vs_observed,
+            attention_routine=read_attention_routine(),
+            finiteness_passed=finiteness_passed,
+            inverted_zero_verdict=inverted_zero,
         ),
     )
     _LOG.info("wrote run JSON %s", run_path)
@@ -594,15 +693,18 @@ def _run_gpu_init(
     init_pair: InitPair,
     *,
     persist_init_id: int,
+    steps: int,
     source: HresT0Source,
     model: Aurora,
     spec: ModelSpec,
     baseline_dir: Path,
     output_dir: Path,
     env: Any,
-    variant_name: str,
+    variant: VariantConfig,
     load_s: float,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    observed_formats: list[ObservedModuleDType],
+    declared_vs_observed: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]] | None:
     init_time = as_naive_datetime(init_pair.init_time)
     batch = source.load(init_time, spec)
     validate_batch(batch, spec)
@@ -611,15 +713,39 @@ def _run_gpu_init(
         "persist_init_id=%s init_time=%s steps=%s",
         persist_init_id,
         init_time.isoformat(),
-        init_pair.n_rollout_steps,
+        steps,
     )
-    preds, wall_s, cuda_ms, memory = _variant_rollout(
-        model,
-        batch,
-        init_pair.n_rollout_steps,
-        persist_init_id=persist_init_id,
-        step_hours=spec.input_timestep_hours,
-    )
+    try:
+        preds, wall_s, cuda_ms, memory = _variant_rollout(
+            model,
+            batch,
+            steps,
+            persist_init_id=persist_init_id,
+            step_hours=spec.input_timestep_hours,
+            init_time=init_time,
+        )
+    except NonFinitePredictionError as exc:
+        _LOG.error("%s; stopping this variant", exc)
+        _write_init_run_log(
+            output_dir,
+            env=env,
+            variant=variant,
+            persist_init_id=persist_init_id,
+            init_time=init_time,
+            n_steps=steps,
+            load_s=load_s,
+            rollout_s=0.0,
+            rollout_ms=None,
+            preds=[],
+            memory=snapshot_memory(_GPU_DEVICE),
+            max_rmse_vs_baseline=None,
+            observed_formats=observed_formats,
+            declared_vs_observed=declared_vs_observed,
+            finiteness_passed=False,
+            inverted_zero=None,
+            warnings=[str(exc)],
+        )
+        return None
     del batch
     vs_baseline, vs_truth = _score_init_against_archive(
         preds,
@@ -630,26 +756,35 @@ def _run_gpu_init(
         init_time=init_time,
     )
     max_vs_baseline = _max_rmse(vs_baseline)
+    zero_verdict = inverted_zero_verdict(
+        variant_name=variant.name,
+        rmses=[float(row["rmse"]) for row in vs_baseline],
+    )
     _LOG.info(
-        "persist_init_id=%s scored vs_baseline=%s rows max=%.4g; vs_truth=%s rows",
+        "persist_init_id=%s scored vs_baseline=%s rows max=%.4g; vs_truth=%s rows inverted_zero=%s",
         persist_init_id,
         len(vs_baseline),
         max_vs_baseline,
         len(vs_truth),
+        zero_verdict,
     )
     _write_init_run_log(
         output_dir,
         env=env,
-        variant_name=variant_name,
+        variant=variant,
         persist_init_id=persist_init_id,
         init_time=init_time,
-        n_steps=init_pair.n_rollout_steps,
+        n_steps=steps,
         load_s=load_s,
         rollout_s=wall_s,
         rollout_ms=cuda_ms,
         preds=preds,
         memory=memory,
         max_rmse_vs_baseline=max_vs_baseline,
+        observed_formats=observed_formats,
+        declared_vs_observed=declared_vs_observed,
+        finiteness_passed=True,
+        inverted_zero=zero_verdict,
     )
     del preds
     return vs_baseline, vs_truth
@@ -662,6 +797,7 @@ def _run_gpu_campaign(
     output_dir: Path,
     rollout_config: Path,
     max_inits: int | None,
+    max_steps: int | None,
 ) -> int:
     _apply_gpu_hygiene()
     spec = variant.spec
@@ -678,6 +814,7 @@ def _run_gpu_campaign(
     load_s = time.perf_counter() - load_started
     _LOG.info("loaded variant %s on %s in %.2fs", variant.name, _GPU_DEVICE, load_s)
     env = collect_env()
+    hooks = install_dtype_hooks(model)
 
     init_pairs = list(schedule.init_pairs)
     if max_inits is not None:
@@ -685,7 +822,17 @@ def _run_gpu_campaign(
         _LOG.info("capping campaign at %s inits (of %s)", len(init_pairs), len(schedule.init_pairs))
     if not init_pairs:
         _LOG.error("campaign has no inits")
+        hooks.remove()
         return 1
+
+    scheduled_steps = init_pairs[0].n_rollout_steps
+    steps = _capped_rollout_steps(scheduled_steps, max_steps)
+    if steps != scheduled_steps:
+        _LOG.info(
+            "capping rollout at %s steps (TOML n_rollout_steps=%s)",
+            steps,
+            scheduled_steps,
+        )
 
     resolved: list[tuple[InitPair, int]] = []
     for init_pair in init_pairs:
@@ -697,6 +844,7 @@ def _run_gpu_campaign(
                 init_time.isoformat(),
                 baseline_dir,
             )
+            hooks.remove()
             return 1
         resolved.append((init_pair, persist_init_id))
 
@@ -707,6 +855,31 @@ def _run_gpu_campaign(
     batch = batch.to(_GPU_DEVICE)
     _warmup(model, batch, step_hours=spec.input_timestep_hours)
     del batch
+    try:
+        dvo = check_declared_versus_observed(variant, model, hooks.observations)
+    except DeclaredObservedMismatchError as exc:
+        _LOG.error("%s", exc)
+        _write_session_json(
+            output_dir / "session.json",
+            {
+                "baseline_dir": str(baseline_dir),
+                "cpu_dry_run": False,
+                "declared_vs_observed": str(exc),
+                "device": _GPU_DEVICE,
+                "env": env.model_dump(mode="json"),
+                "fields": FIELDS_HEADLINE,
+                "max_steps": max_steps,
+                "n_steps": steps,
+                "rollout_config": str(rollout_config),
+                "sku": _sku(_GPU_DEVICE),
+                "variant": variant.name,
+                "warmup_forwards": _WARMUP_FORWARDS,
+            },
+        )
+        hooks.remove()
+        return 1
+    observed_formats = list(hooks.observations)
+    hooks.remove()
 
     session_path = output_dir / "session.json"
     _write_session_json(
@@ -714,10 +887,12 @@ def _run_gpu_campaign(
         {
             "baseline_dir": str(baseline_dir),
             "cpu_dry_run": False,
+            "declared_vs_observed": dvo,
             "device": _GPU_DEVICE,
             "env": env.model_dump(mode="json"),
             "fields": FIELDS_HEADLINE,
-            "n_steps": first_pair.n_rollout_steps,
+            "max_steps": max_steps,
+            "n_steps": steps,
             "rollout_config": str(rollout_config),
             "sku": _sku(_GPU_DEVICE),
             "variant": variant.name,
@@ -732,22 +907,30 @@ def _run_gpu_campaign(
     vs_truth_rows = load_rmse_rows(vs_truth_dir)
     done_ids = {int(row["init_id"]) for row in vs_baseline_rows}
 
+    stopped_nonfinite = False
     for init_pair, persist_init_id in resolved:
         if persist_init_id in done_ids:
             _LOG.info("skip persist_init_id=%s (already scored)", persist_init_id)
             continue
-        scored_baseline, scored_truth = _run_gpu_init(
+        scored = _run_gpu_init(
             init_pair,
             persist_init_id=persist_init_id,
+            steps=steps,
             source=source,
             model=model,
             spec=spec,
             baseline_dir=baseline_dir,
             output_dir=output_dir,
             env=env,
-            variant_name=variant.name,
+            variant=variant,
             load_s=load_s,
+            observed_formats=observed_formats,
+            declared_vs_observed=dvo,
         )
+        if scored is None:
+            stopped_nonfinite = True
+            break
+        scored_baseline, scored_truth = scored
         vs_baseline_rows.extend(scored_baseline)
         vs_truth_rows.extend(scored_truth)
         write_rmse_tables(vs_baseline_rows, vs_baseline_dir)
@@ -759,6 +942,11 @@ def _run_gpu_campaign(
             len(vs_truth_rows),
         )
 
+    hooks.remove()
+    if stopped_nonfinite:
+        _LOG.warning("variant stopped on non-finite output; remaining inits skipped")
+        _LOG.info(_TEARDOWN_REMINDER)
+        return 0
     if not vs_baseline_rows or not vs_truth_rows:
         _LOG.error("no RMSE rows produced")
         return 1
@@ -777,6 +965,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.max_inits is not None and args.max_inits < 1:
         print(f"max-inits must be >= 1 (got {args.max_inits})", file=sys.stderr)
+        return 2
+    if args.max_steps is not None and args.max_steps < 1:
+        print(f"max-steps must be >= 1 (got {args.max_steps})", file=sys.stderr)
         return 2
 
     variant = _lookup_variant(args.variant)
@@ -826,6 +1017,7 @@ def main(argv: list[str] | None = None) -> int:
         output_dir=output_dir,
         rollout_config=rollout_config,
         max_inits=args.max_inits,
+        max_steps=args.max_steps,
     )
 
 

@@ -3,18 +3,75 @@
 Each step consumes two input timesteps (T=2) and yields one predicted step (T=1)
 at a 6-hour lead. ``validate_batch`` gates the *input* at this boundary; output
 batches have T=1 and therefore cannot pass the input contract.
+
+Returned predictions are FP32 copies. The generator's native tensors are left
+alone so a 16-bit rollout can concatenate history at parameter width.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 
 import torch
 from aurora import Aurora, Batch, rollout
 
 from aurora_inference.contract import AURORA_PRETRAINED_SPEC, ModelSpec, validate_batch
 
-__all__ = ["run_rollout"]
+__all__ = [
+    "NonFinitePredictionError",
+    "cast_prediction_to_fp32",
+    "check_prediction_finite",
+    "finalize_rollout_predictions",
+    "run_rollout",
+]
+
+
+class NonFinitePredictionError(RuntimeError):
+    """A predicted field contained NaN or Inf. Stop this run; keep the session."""
+
+    def __init__(
+        self,
+        *,
+        variable: str,
+        step: int,
+        init_time: datetime | None = None,
+    ) -> None:
+        self.variable = variable
+        self.step = step
+        self.init_time = init_time
+        when = "" if init_time is None else f" init_time={init_time.isoformat()}"
+        super().__init__(f"non-finite {variable} at step {step}{when}")
+
+
+def cast_prediction_to_fp32(pred: Batch) -> Batch:
+    """Copy weather tensors to FP32. Leave ``lat`` / ``lon`` unchanged.
+
+    Aurora's ``Batch.type`` also casts coordinates; the encoder then asserts
+    ``Latitude num. unstable``. Persist and score need FP32 weather only.
+    """
+    return Batch(
+        surf_vars={key: tensor.float() for key, tensor in pred.surf_vars.items()},
+        static_vars={key: tensor.float() for key, tensor in pred.static_vars.items()},
+        atmos_vars={key: tensor.float() for key, tensor in pred.atmos_vars.items()},
+        metadata=pred.metadata,
+    )
+
+
+def check_prediction_finite(
+    pred: Batch,
+    *,
+    step: int,
+    init_time: datetime | None = None,
+) -> None:
+    """Raise on the first non-finite predicted field. Watch ``msl`` first.
+
+    FP16 overflow is the expected trigger: max finite FP16 is about 65 504 and
+    mean sea level pressure in pascals is about 101 325.
+    """
+    for name, tensor in _predicted_fields(pred):
+        if not torch.isfinite(tensor).all():
+            raise NonFinitePredictionError(variable=name, step=step, init_time=init_time)
 
 
 def run_rollout(
@@ -25,11 +82,15 @@ def run_rollout(
     spec: ModelSpec = AURORA_PRETRAINED_SPEC,
     offload_to_cpu: bool = False,
     on_step: Callable[[int, Batch], None] | None = None,
+    init_time: datetime | None = None,
+    check_finite: bool = True,
+    cast_to_fp32: bool = True,
 ) -> list[Batch]:
     """Roll the model forward ``steps`` times and return one ``Batch`` per lead time.
 
     Wraps :func:`aurora.rollout.rollout` under ``torch.inference_mode()``. Device
-    placement follows the model.
+    placement follows the model. Each step is checked for non-finite values,
+    then copied to FP32 for persist/score. Native tensors are not mutated.
 
     Args:
         model: An Aurora checkpoint already in eval mode on the target device
@@ -41,15 +102,24 @@ def run_rollout(
             VRAM does not accumulate a 40-step list. Does not mutate the GPU
             tensors ``rollout`` still uses for the next-step ``torch.cat``.
         on_step: Optional callback ``(step_index, pred)`` after each lead
-            (1-based). Invoked after CPU offload when that flag is set.
+            (1-based). Receives the FP32 copy. Invoked after CPU offload when
+            that flag is set.
+        init_time: Optional forecast start, attached to non-finite errors.
+        check_finite: If False, skip the non-finite guard. Untrained debug
+            models emit NaNs; production persist/score paths keep the default.
+        cast_to_fp32: If False, return native-width tensors. Timed GPU runs
+            opt out so the CUDA timer matches Stage 2 (forward + offload only),
+            then call :func:`finalize_rollout_predictions` after the event pair.
 
     Returns:
         ``steps`` batches, each with time dim 1, in lead-time order
-        (6 h, 12 h, …).
+        (6 h, 12 h, …). Weather tensors are FP32 when ``cast_to_fp32`` is True.
 
     Raises:
         ValueError: ``steps`` is less than 1.
         BatchContractError: ``batch`` fails :func:`validate_batch`.
+        NonFinitePredictionError: A predicted field is NaN or Inf and
+            ``check_finite`` is True.
         RuntimeError: An output batch does not have time dim 1.
     """
     if steps < 1:
@@ -63,13 +133,42 @@ def run_rollout(
         for step_index, pred in enumerate(rollout(model, batch, steps), start=1):
             if offload_to_cpu:
                 pred = pred.to("cpu")
+            if check_finite:
+                check_prediction_finite(pred, step=step_index, init_time=init_time)
+            stored = cast_prediction_to_fp32(pred) if cast_to_fp32 else pred
             if on_step is not None:
-                on_step(step_index, pred)
-            predictions.append(pred)
+                on_step(step_index, stored)
+            predictions.append(stored)
 
     for pred in predictions:
         _assert_output_time_dim_is_one(pred)
     return predictions
+
+
+def finalize_rollout_predictions(
+    preds: list[Batch],
+    *,
+    init_time: datetime | None = None,
+) -> list[Batch]:
+    """Host-side finite check and FP32 copy. Call after the CUDA timer, not inside it."""
+    stored: list[Batch] = []
+    for step_index, pred in enumerate(preds, start=1):
+        check_prediction_finite(pred, step=step_index, init_time=init_time)
+        stored.append(cast_prediction_to_fp32(pred))
+    return stored
+
+
+def _predicted_fields(pred: Batch) -> list[tuple[str, torch.Tensor]]:
+    """Surface then atmosphere; ``msl`` first among surface fields."""
+    fields: list[tuple[str, torch.Tensor]] = []
+    if "msl" in pred.surf_vars:
+        fields.append(("msl", pred.surf_vars["msl"]))
+    for name, tensor in pred.surf_vars.items():
+        if name != "msl":
+            fields.append((name, tensor))
+    for name, tensor in pred.atmos_vars.items():
+        fields.append((name, tensor))
+    return fields
 
 
 def _assert_output_time_dim_is_one(prediction: Batch) -> None:

@@ -12,7 +12,7 @@ from typing import cast
 import numpy as np
 import xarray as xr
 
-__all__ = ["MSE"]
+__all__ = ["MSE", "get_lat_weights"]
 
 
 def _assert_increasing(x: np.ndarray) -> None:
@@ -58,4 +58,13 @@ class MSE:
         truth: xr.Dataset,
         skipna: bool = False,
     ) -> xr.Dataset:
-        return _spatial_average((forecast - truth) ** 2, skipna=skipna)
+        """Latitude-weighted MSE. Accumulate in FP64; return FP32-width arrays.
+
+        Storage of forecasts stays FP32. FP64 is the reduction width only — a
+        close variant's per-cell difference is ~1e-4, and ~1e6 additions in
+        FP32 can round by as much as the quantity being measured.
+        """
+        forecast64 = forecast.astype(np.float64)
+        truth64 = truth.astype(np.float64)
+        mse64 = _spatial_average((forecast64 - truth64) ** 2, skipna=skipna)
+        return mse64.astype(np.float32)

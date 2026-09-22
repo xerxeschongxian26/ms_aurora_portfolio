@@ -24,9 +24,11 @@ from aurora_inference.config import AURORA_HF_REVISION
 from aurora_inference.logging import peak_rss_bytes
 
 __all__ = [
+    "DeclaredPrecision",
     "EnvSnapshot",
     "HygieneFlags",
     "MemoryRecord",
+    "ObservedModuleDType",
     "RunIdentity",
     "RunLog",
     "StepChecksum",
@@ -36,6 +38,7 @@ __all__ = [
     "cuda_timing_available",
     "load_run_log",
     "measure_cuda_elapsed_ms",
+    "read_attention_routine",
     "read_hygiene_flags",
     "reset_vram_peak",
     "snapshot_memory",
@@ -56,6 +59,8 @@ class HygieneFlags(BaseModel):
     cuda_matmul_allow_tf32: bool | None
     cudnn_allow_tf32: bool | None
     inference_mode_enabled: bool
+    allow_fp16_reduced_precision_reduction: bool | None = None
+    allow_bf16_reduced_precision_reduction: bool | None = None
 
 
 class EnvSnapshot(BaseModel):
@@ -124,6 +129,29 @@ class StepChecksum(BaseModel):
     t850_abs_max: float
 
 
+class ObservedModuleDType(BaseModel):
+    """Number format entering and leaving one hooked module, once per run."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    module: str
+    input_dtype: str
+    output_dtype: str
+    qualified_name: str | None = None
+
+
+class DeclaredPrecision(BaseModel):
+    """The five typed fields copied from ``VariantConfig`` at run time."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    weights_dtype: str
+    matmul_operand: str
+    accumulator: str
+    reduction_ops: str
+    scope: str
+
+
 class RunLog(BaseModel):
     """One inference run: env + identity + timing + memory + checksums."""
 
@@ -136,6 +164,12 @@ class RunLog(BaseModel):
     checksums: list[StepChecksum] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     max_rmse_variant_vs_baseline: float | None = None
+    declared_precision: DeclaredPrecision | None = None
+    observed_formats: list[ObservedModuleDType] = Field(default_factory=list)
+    declared_vs_observed: str | None = None
+    attention_routine: str | None = None
+    finiteness_passed: bool | None = None
+    inverted_zero_verdict: str | None = None
 
 
 def read_hygiene_flags() -> HygieneFlags:
@@ -146,7 +180,33 @@ def read_hygiene_flags() -> HygieneFlags:
         cuda_matmul_allow_tf32=_optional_bool(lambda: torch.backends.cuda.matmul.allow_tf32),
         cudnn_allow_tf32=_optional_bool(lambda: torch.backends.cudnn.allow_tf32),
         inference_mode_enabled=bool(torch.is_inference_mode_enabled()),
+        allow_fp16_reduced_precision_reduction=_optional_bool(
+            lambda: torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+        ),
+        allow_bf16_reduced_precision_reduction=_optional_bool(
+            lambda: torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
+        ),
     )
+
+
+def read_attention_routine() -> str | None:
+    """Enabled SDPA backends. None on a machine with no CUDA.
+
+    The kernel picked per call is not exposed in Python; this is the observable
+    allow-list. Do not change which routine is used — ``TODO(stage-3-followup)``.
+    """
+    if not torch.cuda.is_available():
+        return None
+    enabled: list[str] = []
+    for name, reader in (
+        ("flash", torch.backends.cuda.flash_sdp_enabled),
+        ("mem_efficient", torch.backends.cuda.mem_efficient_sdp_enabled),
+        ("math", torch.backends.cuda.math_sdp_enabled),
+        ("cudnn", torch.backends.cuda.cudnn_sdp_enabled),
+    ):
+        if _optional_bool(reader):
+            enabled.append(name)
+    return ",".join(enabled) if enabled else "unknown"
 
 
 def collect_env(*, pip_freeze_path: Path | str | None = None) -> EnvSnapshot:
