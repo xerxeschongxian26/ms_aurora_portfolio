@@ -38,6 +38,7 @@ notebooks = [
     "detect-secrets>=1.5.0",
     "ipykernel>=7.0.0",
     "jupyter>=1.1.0",
+    "imageio-ffmpeg>=0.5.1",
     "weatherbench2",
 ]
 
